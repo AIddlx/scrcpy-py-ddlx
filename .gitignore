@@ -102,4 +102,4 @@ screenshot*.jpg
 
 # 文档（仅保留 user/ 和 api/，忽略内部文档）
 docs/archive/
-docs/development/
+docs/development/CLAUDE.md
