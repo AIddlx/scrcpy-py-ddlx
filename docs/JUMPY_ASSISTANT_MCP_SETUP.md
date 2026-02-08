@@ -17,8 +17,8 @@
 mkdir ddlx
 cd ddlx
 
-# 克隆项目（替换为实际的仓库地址）
-git clone https://github.com/yourusername/scrcpy-py-ddlx.git
+# 克隆项目
+git clone https://github.com/AIddlx/scrcpy-py-ddlx.git
 cd scrcpy-py-ddlx
 ```
 

@@ -17,7 +17,7 @@ mkdir ddlx
 cd ddlx
 
 # 克隆项目
-git clone https://github.com/AIddlx/scrcpy_py_ddlx.git
+git clone https://github.com/AIddlx/scrcpy-py-ddlx.git
 ```
 
 ### 2. 创建虚拟环境
@@ -177,4 +177,4 @@ MIT License
 ## 参考资料
 
 - **[官方 scrcpy](https://github.com/Genymobile/scrcpy)** - Android 镜像与控制工具（原项目）
-- **[本仓库](https://github.com/AIddlx/scrcpy_py_ddlx)** - Python 客户端实现
+- **[本仓库](https://github.com/AIddlx/scrcpy-py-ddlx)** - Python 客户端实现

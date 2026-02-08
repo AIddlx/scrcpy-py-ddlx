@@ -225,6 +225,19 @@ def auto_discover_device():
             network_prefix = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}"
 
             print(f"[INFO] 正在扫描网段 {network_prefix}.0/24 中开启 ADB 无线调试的设备...")
+
+            # 触发网络发现（Ping 网关和常见地址，解决 Windows 防火墙/ARP 延迟问题）
+            print("[INFO] 触发网络发现（ping 网关）...")
+            try:
+                gateway_ip = f"{network_prefix}.1"
+                subprocess.run(
+                    ["ping", "-n", "1", "-w", "500", gateway_ip],
+                    capture_output=True,
+                    timeout=2
+                )
+            except Exception:
+                pass
+
             print("[INFO] 正在扫描设备（这可能需要 10-30 秒）...")
 
             # 扫描网段内常见 IP 范围（1-254）

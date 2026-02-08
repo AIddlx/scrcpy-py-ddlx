@@ -198,4 +198,4 @@ pip install av>=13.0.0
    ```bash
    python tests_gui/test_direct.py
    ```
-4. 查看 [GitHub Issues](https://github.com/AIddlx/scrcpy_py_ddlx/issues)
+4. 查看 [GitHub Issues](https://github.com/AIddlx/scrcpy-py-ddlx/issues)

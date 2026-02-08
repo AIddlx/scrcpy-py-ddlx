@@ -103,3 +103,6 @@ screenshot*.jpg
 # 文档（仅保留 user/ 和 api/，忽略内部文档）
 docs/archive/
 docs/development/CLAUDE.md
+
+# 根目录的 CLAUDE.md（不提交到 GitHub）
+CLAUDE.md

@@ -7,7 +7,7 @@
 3. 保持设备唤醒状态
 
 运行方式:
-    cd C:\Project\IDEA\2\scrcpy-py-ddlx
+    # 在项目根目录下运行
     python -X utf8 tests_gui/test_seamless_wireless.py
 """
 

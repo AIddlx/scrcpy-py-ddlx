@@ -27,11 +27,11 @@ else:
 setup(
     name="scrcpy-py-ddlx",
     version=version,
-    author="AutoGLM",
+    author="AIddlx",
     description="Pure Python implementation of scrcpy client for Android devices",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/autoglm/py-scrcpy",
+    url="https://github.com/AIddlx/scrcpy-py-ddlx",
     packages=find_packages(exclude=["tests*", "examples*"]),
     classifiers=[
         "Development Status :: 4 - Beta",
