@@ -744,6 +744,14 @@ class OpenGLVideoWindow(QMainWindow if QMainWindow else object):
         self.activateWindow()
         # Force window to be visible immediately
         self.setVisible(True)
+
+        # For QOpenGLWindow mode, ensure the renderer is exposed and initialized
+        if self._opengl_renderer:
+            # QOpenGLWindow needs to be exposed to trigger initialize()
+            self._opengl_renderer.expose()
+            # Request an update to trigger the first render
+            self._opengl_renderer.requestUpdate()
+
         logger.info(f"OpenGLVideoWindow shown, geometry={self.geometry()}, visible={self.isVisible()}")
 
     def _center_on_screen(self) -> None:

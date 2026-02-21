@@ -256,9 +256,29 @@ def create_opengl_video_renderer_class():
             """Handle window resize."""
             glViewport(0, 0, w, h)
 
+        def event(self, event):
+            """Handle QEvent, particularly expose events to trigger rendering."""
+            from PySide6.QtCore import QEvent
+            if event.type() == QEvent.Type.UpdateRequest:
+                # Trigger a render on update request
+                pass
+            return super().event(event)
+
+        def exposeEvent(self, event):
+            """Handle window expose event - triggered when window becomes visible."""
+            super().exposeEvent(event)
+            if self.isExposed():
+                # Window is exposed, request an update to trigger render
+                self.requestUpdate()
+                logger.debug("[OPENGL_WINDOW] Window exposed, requesting update")
+
         def render(self) -> None:
             """Render the video frame using OpenGL."""
             self._paint_count = getattr(self, '_paint_count', 0) + 1
+
+            # Ensure OpenGL is initialized (may not be called automatically with createWindowContainer)
+            if self._texture_id is None:
+                self.initialize()
 
             with _profile_time('glClear'):
                 glClearColor(0.0, 0.0, 0.0, 1.0)

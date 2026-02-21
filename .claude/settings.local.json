@@ -70,7 +70,8 @@
       "mcp__web-search-prime__webSearchPrime",
       "Bash(pip show:*)",
       "Bash(head:*)",
-      "Bash(py-spy top:*)"
+      "Bash(py-spy top:*)",
+      "Bash(cd:*)"
     ]
   }
 }
