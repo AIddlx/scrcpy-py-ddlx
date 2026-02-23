@@ -249,8 +249,10 @@ class VideoDecoder:
         self._running = False
 
         # Packet queue (optional external queue, or create internal one)
-        # Use small queue (3) to minimize latency - old packets are dropped
-        self._packet_queue: Queue = packet_queue if packet_queue is not None else Queue(maxsize=3)
+        # ULTRA LOW LATENCY: Use queue size of 1 for real-time video streaming
+        # This ensures we always decode the latest frame, never accumulate old packets
+        # Trade-off: May lose packets if decoder can't keep up, but latency is minimized
+        self._packet_queue: Queue = packet_queue if packet_queue is not None else Queue(maxsize=1)
 
         # Use DelayBuffer (single-frame buffer with drop policy) instead of Queue
         # This matches official scrcpy design for minimal latency
@@ -406,14 +408,19 @@ class VideoDecoder:
             codec.height = self._height
             codec.pix_fmt = "yuv420p"
 
+            # CRITICAL: Set LOW_DELAY flag for BOTH software and hardware decoders
+            # This minimizes latency by reducing frame reordering and preventing
+            # the decoder from holding multiple reference frames
+            # FFmpeg: AV_CODEC_FLAG_LOW_DELAY = 0x00080000
+            #
+            # KEY ISSUE FIXED: Hardware decoders (cuvid/nvdec) have fixed frame buffering
+            # by default (3-5 frames). This causes latency proportional to frame interval:
+            # - 60fps: 5 frames × 16.67ms = 83ms
+            # - 10fps: 5 frames × 100ms = 500ms (explains 300-500ms lag in VBR mode!)
+            codec.flags |= 0x00080000  # AV_CODEC_FLAG_LOW_DELAY
+
             if not self._using_hw_decoder:
                 # Software decoder settings
-                # CRITICAL: Set LOW_DELAY flag to match official scrcpy behavior
-                # This minimizes latency by reducing frame reordering and preventing
-                # the decoder from holding multiple reference frames
-                # FFmpeg: AV_CODEC_FLAG_LOW_DELAY = 0x00080000
-                codec.flags |= 0x00080000  # AV_CODEC_FLAG_LOW_DELAY
-
                 # CRITICAL: Add flags2 for fast decoding (matching audio decoder)
                 # AV_CODEC_FLAG2_FAST allows non-spec compliant speedup tricks
                 codec.flags2 |= 0x00000001  # AV_CODEC_FLAG2_FAST
@@ -426,6 +433,24 @@ class VideoDecoder:
                 # Hardware decoders may need different settings
                 # Most hardware decoders handle threading internally
                 codec.thread_count = 0  # Let hardware decoder decide
+
+                # ULTRA LOW LATENCY: Reduce hardware decoder surface buffering
+                # NVIDIA cuvid/nvdec decoders default to 5+ surfaces which adds latency
+                # Reducing to 2-3 surfaces minimizes buffering for real-time streams
+                # Reference: FFmpeg h264_cuvid/hevc_cuvid decoder options
+                try:
+                    # Try to set minimal surfaces for lowest latency
+                    # 'surfaces' controls the number of decode surfaces (frame buffers)
+                    # Lower values = lower latency but may cause issues with complex streams
+                    codec.options = {
+                        'surfaces': '2',  # Minimal surfaces for ultra low latency
+                    }
+                    logger.info(f"[LOW_DELAY] Hardware decoder surfaces=2 (ultra low latency mode)")
+                except Exception as e:
+                    logger.warning(f"[LOW_DELAY] Could not set surfaces option: {e}")
+
+                # Log low-delay mode for hardware decoder
+                logger.info(f"[LOW_DELAY] Hardware decoder LOW_DELAY flag enabled")
 
             self._codec_context = codec
             decoder_type = "HARDWARE" if self._using_hw_decoder else "SOFTWARE"
@@ -601,22 +626,88 @@ class VideoDecoder:
 
         Note:
             Config packets are handled internally but do not produce frames.
+
+        Smart Frame Handling:
+            For high-frame-rate content (games), drop old packets to minimize latency.
+            For low-frame-rate content (clocks), preserve unique PTS packets to avoid time jumps.
         """
         if not self._running:
             logger.warning("Cannot push packet: decoder is not running")
             return
 
         try:
-            # Non-blocking put: if queue is full, drop oldest packet
-            # This minimizes latency by always keeping the newest packets
-            if self._packet_queue.full():
+            # Fast path: queue not full, just add
+            if not self._packet_queue.full():
+                self._packet_queue.put_nowait(packet)
+                return
+
+            # Queue is full, apply smart drop strategy
+            new_pts = packet.header.pts
+
+            # Peek at queue contents to make smart decision
+            # We need to drain and re-fill to inspect PTS values
+            temp_packets = []
+            has_same_pts = False
+            oldest_idx = 0
+            oldest_pts = None
+
+            while True:
                 try:
-                    # Try to remove oldest packet to make room
-                    self._packet_queue.get_nowait()
-                    logger.debug("Dropped oldest packet from full queue")
+                    old_packet = self._packet_queue.get_nowait()
+                    temp_packets.append(old_packet)
+                    # Track if we have packets with same PTS as incoming
+                    if old_packet.header.pts == new_pts:
+                        has_same_pts = True
+                    # Track oldest packet (by position, first is oldest in FIFO)
+                    if oldest_pts is None:
+                        oldest_pts = old_packet.header.pts
                 except:
-                    pass
-            self._packet_queue.put_nowait(packet)
+                    break
+
+            if not temp_packets:
+                # Queue was emptied unexpectedly
+                self._packet_queue.put_nowait(packet)
+                return
+
+            if has_same_pts:
+                # Drop ONE redundant packet (same PTS as incoming)
+                # This preserves unique PTS frames while making room
+                kept_one = False
+                for i, p in enumerate(temp_packets):
+                    if p.header.pts == new_pts and not kept_one:
+                        # Skip this one (drop redundant)
+                        if not hasattr(self, '_redundant_drop_count'):
+                            self._redundant_drop_count = 0
+                        self._redundant_drop_count += 1
+                        if self._redundant_drop_count <= 3 or self._redundant_drop_count % 100 == 0:
+                            logger.debug(f"[SMART_DROP] Dropped redundant packet (PTS={new_pts}, total={self._redundant_drop_count})")
+                    else:
+                        self._packet_queue.put_nowait(p)
+                self._packet_queue.put_nowait(packet)
+            elif new_pts > oldest_pts:
+                # New packet is NEWER than oldest in queue
+                # Normal progression, drop oldest to make room
+                if not hasattr(self, '_oldest_drop_count'):
+                    self._oldest_drop_count = 0
+                self._oldest_drop_count += 1
+                if self._oldest_drop_count <= 3 or self._oldest_drop_count % 100 == 0:
+                    logger.debug(f"[SMART_DROP] Dropped oldest packet (PTS {oldest_pts} -> {new_pts}, total={self._oldest_drop_count})")
+                # Re-queue all but the first (oldest)
+                for p in temp_packets[1:]:
+                    self._packet_queue.put_nowait(p)
+                self._packet_queue.put_nowait(packet)
+            else:
+                # New packet is NOT newer (out-of-order or same PTS)
+                # Drop the incoming packet, keep queue as-is
+                if not hasattr(self, '_outdated_drop_count'):
+                    self._outdated_drop_count = 0
+                self._outdated_drop_count += 1
+                if self._outdated_drop_count <= 3 or self._outdated_drop_count % 100 == 0:
+                    logger.debug(f"[SMART_DROP] Dropped outdated packet (PTS={new_pts} <= {oldest_pts}, total={self._outdated_drop_count})")
+                # Re-queue all original packets
+                for p in temp_packets:
+                    self._packet_queue.put_nowait(p)
+
         except Exception as e:
             logger.debug(f"Failed to push packet to queue: {e}")
 
