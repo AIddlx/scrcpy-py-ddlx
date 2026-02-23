@@ -75,7 +75,7 @@ try:
         GL_TEXTURE_MAG_FILTER, GL_LINEAR, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T,
         GL_CLAMP_TO_EDGE, GL_COLOR_BUFFER_BIT, GL_QUADS,
         GL_PROJECTION, GL_MODELVIEW, GL_TEXTURE0, GL_TEXTURE1, GL_TEXTURE2,
-        GL_UNPACK_ALIGNMENT, GL_LUMINANCE
+        GL_UNPACK_ALIGNMENT, GL_LUMINANCE, GL_RG
     )
     try:
         from PySide6.QtOpenGL import QOpenGLShader, QOpenGLShaderProgram
@@ -103,7 +103,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# NV12 YUV Shader sources
+# NV12 YUV Shader sources (optimized: 2 textures instead of 3)
+# Y texture: LUMINANCE format (single channel)
+# UV texture: RG format (R=U, G=V) - eliminates U/V plane separation copies
 NV12_VERTEX_SHADER = """
 varying highp vec2 v_texCoord;
 void main() {
@@ -115,12 +117,11 @@ void main() {
 NV12_FRAGMENT_SHADER = """
 varying highp vec2 v_texCoord;
 uniform sampler2D y_texture;
-uniform sampler2D u_texture;
-uniform sampler2D v_texture;
+uniform sampler2D uv_texture;
 void main() {
     mediump float y = texture2D(y_texture, v_texCoord).r;
-    mediump float u = texture2D(u_texture, v_texCoord).r - 0.5;
-    mediump float v = texture2D(v_texture, v_texCoord).r - 0.5;
+    mediump float u = texture2D(uv_texture, v_texCoord).r - 0.5;
+    mediump float v = texture2D(uv_texture, v_texCoord).g - 0.5;
     highp float r = y + 1.402 * v;
     highp float g = y - 0.344136 * u - 0.714136 * v;
     highp float b = y + 1.772 * u;
@@ -187,10 +188,9 @@ def create_opengl_video_renderer_class():
             self._texture_width: int = 0
             self._texture_height: int = 0
 
-            # NV12 GPU rendering support
+            # NV12 GPU rendering support (2 textures: Y + UV)
             self._y_texture_id: Optional[int] = None
-            self._u_texture_id: Optional[int] = None
-            self._v_texture_id: Optional[int] = None
+            self._uv_texture_id: Optional[int] = None  # UV interleaved (RG format)
             self._nv12_shader: Optional['QOpenGLShaderProgram'] = None
             self._nv12_initialized: bool = False
             self._frame_format: int = 0  # 0=RGB, 1=NV12
@@ -238,8 +238,9 @@ def create_opengl_video_renderer_class():
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
 
-            # NV12 textures (Y, U, V)
-            for tex_id_attr in ['_y_texture_id', '_u_texture_id', '_v_texture_id']:
+            # NV12 textures (Y + UV, instead of Y + U + V)
+            # This eliminates U/V plane separation copies
+            for tex_id_attr in ['_y_texture_id', '_uv_texture_id']:
                 tex_id = glGenTextures(1)
                 setattr(self, tex_id_attr, tex_id)
                 glBindTexture(GL_TEXTURE_2D, tex_id)
@@ -498,7 +499,12 @@ def create_opengl_video_renderer_class():
 
         def _paint_nv12(self, frame_array, width: int, height: int,
                         x: int, y: int, render_w: int, render_h: int) -> None:
-            """Render NV12 frame using Y/U/V textures and GPU shader."""
+            """Render NV12 frame using Y + UV textures and GPU shader.
+
+            Optimized: Uses 2 textures instead of 3, eliminating U/V plane copies.
+            - Y texture: GL_LUMINANCE (single channel)
+            - UV texture: GL_RG (R=U, G=V, interleaved)
+            """
             if not self._nv12_initialized or self._nv12_shader is None:
                 logger.warning(f"[PAINT_NV12] Not initialized: nv12_init={self._nv12_initialized}, shader={self._nv12_shader is not None}")
                 return
@@ -513,35 +519,36 @@ def create_opengl_video_renderer_class():
                     u_plane = frame_array['u']
                     v_plane = frame_array['v']
                     y_tex_width = y_plane.shape[1] if len(y_plane.shape) > 1 else width
-                    y_tex_height = y_plane.shape[0] if len(y_plane.shape) > 1 else height
-                    uv_tex_width = u_plane.shape[1] if len(u_plane.shape) > 1 else width // 2
-                    uv_tex_height = u_plane.shape[0] if len(u_plane.shape) > 1 else height // 2
 
-                    # Debug first frame - detailed logging
+                    # Interleave U and V planes into UV plane for GL_RG upload
+                    uv_height = height // 2
+                    uv_width = width // 2
+                    uv_plane = np.empty((uv_height, uv_width * 2), dtype=np.uint8)
+                    uv_plane[:, 0::2] = u_plane  # U at even columns
+                    uv_plane[:, 1::2] = v_plane  # V at odd columns
+
                     if not hasattr(self, '_nv12_first_frame_logged'):
                         self._nv12_first_frame_logged = True
-                        logger.info(f"[PAINT_NV12] Dict format: y_shape={y_plane.shape}, u_shape={u_plane.shape}, v_shape={v_plane.shape}")
-                        logger.info(f"[PAINT_NV12] y_contiguous={y_plane.flags['C_CONTIGUOUS']}, u_contiguous={u_plane.flags['C_CONTIGUOUS']}")
-                        logger.info(f"[PAINT_NV12] y_tex={y_tex_width}x{y_tex_height}, uv_tex={uv_tex_width}x{uv_tex_height}")
-                        logger.info(f"[PAINT_NV12] Y range: [{y_plane.min()}, {y_plane.max()}], U range: [{u_plane.min()}, {u_plane.max()}]")
+                        logger.info(f"[PAINT_NV12] Dict format: y_shape={y_plane.shape}, u_shape={u_plane.shape}")
+                        logger.info(f"[PAINT_NV12] Converted to UV interleaved: {uv_plane.shape}")
             else:
                 # Semi-planar NV12 (2D array format: [Y plane; UV plane interleaved])
-                y_plane = frame_array[:height, :].copy()
+                # OPTIMIZATION: Zero-copy - both slices are views, not copies
+                y_plane = frame_array[:height, :]
                 uv_plane = frame_array[height:, :]
-                # UV plane is interleaved: U0 V0 U1 V1 ... per row
-                u_plane = uv_plane[:, 0::2].copy()  # Even columns = U
-                v_plane = uv_plane[:, 1::2].copy()  # Odd columns = V
                 y_tex_width = frame_array.shape[1]
-                uv_tex_width = y_tex_width // 2
 
-            # Ensure contiguous
+                if not hasattr(self, '_nv12_first_frame_logged'):
+                    self._nv12_first_frame_logged = True
+                    logger.info(f"[PAINT_NV12] Semi-planar format: y_shape={y_plane.shape}, uv_shape={uv_plane.shape}")
+                    logger.info(f"[PAINT_NV12] y_contiguous={y_plane.flags['C_CONTIGUOUS']}, uv_contiguous={uv_plane.flags['C_CONTIGUOUS']}")
+
+            # Ensure contiguous (uv_plane from semi-planar is already contiguous)
             with _profile_time('array_contiguous'):
                 if not y_plane.flags['C_CONTIGUOUS']:
                     y_plane = np.ascontiguousarray(y_plane)
-                if not u_plane.flags['C_CONTIGUOUS']:
-                    u_plane = np.ascontiguousarray(u_plane)
-                if not v_plane.flags['C_CONTIGUOUS']:
-                    v_plane = np.ascontiguousarray(v_plane)
+                if not uv_plane.flags['C_CONTIGUOUS']:
+                    uv_plane = np.ascontiguousarray(uv_plane)
 
             uv_width = width // 2
             uv_height = height // 2
@@ -554,19 +561,17 @@ def create_opengl_video_renderer_class():
             # Debug: log texture dimensions on first frame or size change
             if not hasattr(self, '_tex_debug_logged') or uv_size_changed:
                 self._tex_debug_logged = True
-                logger.info(f"[TEX_DEBUG] y_tex: {y_tex_width}x{height}, uv_tex: {uv_tex_width}x{uv_tex_height}, "
-                           f"uv_check: {uv_width}x{uv_height}, uv_changed={uv_size_changed}, "
-                           f"u_plane: {u_plane.shape}, v_plane: {v_plane.shape}")
+                logger.info(f"[TEX_DEBUG] y_tex: {y_tex_width}x{height}, uv_tex: {uv_width}x{uv_height}, "
+                           f"uv_plane: {uv_plane.shape}")
 
             with _profile_time('tex_upload'):
-                # Y texture
+                # Y texture (GL_LUMINANCE)
                 glActiveTexture(GL_TEXTURE0)
                 glBindTexture(GL_TEXTURE_2D, self._y_texture_id)
                 if y_size_changed:
                     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, y_tex_width, height, 0,
                                 GL_LUMINANCE, GL_UNSIGNED_BYTE,
                                 y_plane.ctypes.data_as(c_void_p))
-                    # Set texture parameters (CRITICAL - must be set after glTexImage2D)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
@@ -578,41 +583,23 @@ def create_opengl_video_renderer_class():
                                    GL_LUMINANCE, GL_UNSIGNED_BYTE,
                                    y_plane.ctypes.data_as(c_void_p))
 
-                # U texture
+                # UV texture (GL_RG - interleaved U/V)
                 glActiveTexture(GL_TEXTURE1)
-                glBindTexture(GL_TEXTURE_2D, self._u_texture_id)
+                glBindTexture(GL_TEXTURE_2D, self._uv_texture_id)
                 if uv_size_changed:
-                    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, uv_tex_width, uv_height, 0,
-                                GL_LUMINANCE, GL_UNSIGNED_BYTE,
-                                u_plane.ctypes.data_as(c_void_p))
-                    # Set texture parameters
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG, uv_width, uv_height, 0,
+                                GL_RG, GL_UNSIGNED_BYTE,
+                                uv_plane.ctypes.data_as(c_void_p))
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-                else:
-                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, uv_tex_width, uv_height,
-                                   GL_LUMINANCE, GL_UNSIGNED_BYTE,
-                                   u_plane.ctypes.data_as(c_void_p))
-
-                # V texture
-                glActiveTexture(GL_TEXTURE2)
-                glBindTexture(GL_TEXTURE_2D, self._v_texture_id)
-                if uv_size_changed:
-                    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, uv_tex_width, uv_height, 0,
-                                GL_LUMINANCE, GL_UNSIGNED_BYTE,
-                                v_plane.ctypes.data_as(c_void_p))
-                    # Set texture parameters
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-                    self._nv12_uv_tex_width = uv_tex_width
+                    self._nv12_uv_tex_width = uv_width
                     self._nv12_uv_tex_height = uv_height
                 else:
-                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, uv_tex_width, uv_height,
-                                   GL_LUMINANCE, GL_UNSIGNED_BYTE,
-                                   v_plane.ctypes.data_as(c_void_p))
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, uv_width, uv_height,
+                                   GL_RG, GL_UNSIGNED_BYTE,
+                                   uv_plane.ctypes.data_as(c_void_p))
 
             # Bind shader
             self._nv12_shader.bind()
@@ -622,12 +609,8 @@ def create_opengl_video_renderer_class():
             self._nv12_shader.setUniformValue1i("y_texture", 0)
 
             glActiveTexture(GL_TEXTURE1)
-            glBindTexture(GL_TEXTURE_2D, self._u_texture_id)
-            self._nv12_shader.setUniformValue1i("u_texture", 1)
-
-            glActiveTexture(GL_TEXTURE2)
-            glBindTexture(GL_TEXTURE_2D, self._v_texture_id)
-            self._nv12_shader.setUniformValue1i("v_texture", 2)
+            glBindTexture(GL_TEXTURE_2D, self._uv_texture_id)
+            self._nv12_shader.setUniformValue1i("uv_texture", 1)
 
             glActiveTexture(GL_TEXTURE0)
 
