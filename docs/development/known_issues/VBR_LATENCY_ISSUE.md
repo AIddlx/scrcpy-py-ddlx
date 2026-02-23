@@ -2,7 +2,7 @@
 
 ## 状态
 
-**已修复** - 2026-02-23 - 两轮优化完成
+**已修复** - 2026-02-23 - 三轮优化完成，滞后从 300-500ms 降至 ~111ms
 
 ## 问题描述
 
@@ -57,6 +57,21 @@ self._packet_queue = Queue(maxsize=1)
 
 **效果**：queue_wait 从 0.1-20ms 降至 0.72ms 平均
 
+### 第三轮：事件驱动渲染
+
+将 16ms Timer 轮询改为 Qt Signal 事件驱动：
+
+```python
+# DelayBuffer 添加信号支持
+_frame_ready_signal = Signal()
+delay_buffer.set_frame_ready_signal(self._frame_ready_signal)
+
+# 帧到达时立即触发渲染
+self._frame_ready_signal.connect(self._on_frame_ready)
+```
+
+**效果**：滞后稳定在 ~111ms，消除轮询延迟
+
 ## 完整低延迟配置
 
 | 配置项 | 默认值 | 优化值 | 作用 |
@@ -65,16 +80,15 @@ self._packet_queue = Queue(maxsize=1)
 | `surfaces` (cuvid) | 5+ | 2 | 减少硬件帧缓冲 |
 | `Packet Queue` | maxsize=3 | maxsize=1 | 不累积旧包 |
 | `DelayBuffer` | 1 帧 | 1 帧 | 必要的单帧缓冲 |
+| **渲染模式** | 16ms 轮询 | **Signal 事件驱动** | 帧到达立即渲染 |
 
 ## 优化效果总结
 
-| 指标 | 优化前 | 第一轮后 | 第二轮后 |
-|------|--------|---------|---------|
-| 滞后 | 300-500ms | 115-200ms | 待测 |
-| queue_wait | - | 0.1-20ms | 0.72ms |
-| 帧数比例 | - | ~113%* | 99.3% |
-
-*注：第一轮测试时服务端日志不完整
+| 指标 | 优化前 | 第一轮后 | 第二轮后 | 第三轮后 |
+|------|--------|---------|---------|---------|
+| 滞后 | 300-500ms | 115-200ms | - | **~111ms** |
+| 渲染模式 | 16ms 轮询 | 16ms 轮询 | 16ms 轮询 | **事件驱动** |
+| GIL 调用(10fps) | 60次/秒 | 60次/秒 | 60次/秒 | **10次/秒** |
 
 ## 关键经验
 
@@ -83,12 +97,15 @@ self._packet_queue = Queue(maxsize=1)
 3. **`AV_CODEC_FLAG_LOW_DELAY` 对硬件解码器有效**
 4. **`surfaces` 选项控制 NVIDIA 解码器缓冲**
 5. **诊断关键**：滞后是"固定帧数"而非"固定时间"
+6. **事件驱动渲染**：使用 Qt Signal 替代 Timer 轮询，减少 GIL 竞争
 
 ## 代码位置
 
 - `scrcpy_py_ddlx/core/decoder/video.py` 第418行 - LOW_DELAY 标志
 - `scrcpy_py_ddlx/core/decoder/video.py` 第438行 - surfaces 选项
 - `scrcpy_py_ddlx/core/decoder/video.py` 第253行 - Packet Queue 大小
+- `scrcpy_py_ddlx/core/decoder/delay_buffer.py` - 帧就绪信号
+- `scrcpy_py_ddlx/core/player/video/opengl_window.py` - 事件驱动渲染
 
 ## 参考资料
 

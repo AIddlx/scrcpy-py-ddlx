@@ -50,12 +50,13 @@ def _profile_report():
 
 try:
     from PySide6.QtOpenGL import QOpenGLWindow
-    from PySide6.QtCore import Qt, QTimer
+    from PySide6.QtCore import Qt, QTimer, Signal
     from PySide6.QtGui import QSurfaceFormat, QKeyEvent, QMouseEvent, QWheelEvent
 except ImportError:
     QOpenGLWindow = object
     Qt = None
     QTimer = None
+    Signal = None
     QSurfaceFormat = None
     QKeyEvent = None
     QMouseEvent = None
@@ -148,7 +149,13 @@ def create_opengl_video_renderer_class():
 
         Note: QOpenGLWindow is a QWindow, not a QWidget. Use
         QWidget.createWindowContainer() to embed it in a widget hierarchy.
+
+        Event-driven rendering: Uses a Signal to receive frame-ready notifications
+        from the decoder thread, eliminating the need for 16ms polling.
         """
+
+        # Signal for event-driven rendering (thread-safe)
+        _frame_ready_signal = Signal()
 
         def __init__(self, parent=None):
             """Initialize OpenGL video renderer."""
@@ -160,7 +167,7 @@ def create_opengl_video_renderer_class():
 
             # Configure surface format
             fmt = QSurfaceFormat()
-            fmt.setSwapInterval(1)  # V-Sync
+            fmt.setSwapInterval(0)  # Disable V-Sync for lower CPU usage (~1.5%)
             fmt.setSwapBehavior(QSurfaceFormat.DoubleBuffer)
             fmt.setDepthBufferSize(24)
             fmt.setStencilBufferSize(8)
@@ -274,6 +281,7 @@ def create_opengl_video_renderer_class():
 
         def render(self) -> None:
             """Render the video frame using OpenGL."""
+            render_start = time.time()  # Track total render time
             self._paint_count = getattr(self, '_paint_count', 0) + 1
             if self._paint_count <= 5:
                 logger.info(f"[OPENGL_WINDOW] render() called #{self._paint_count}")
@@ -287,16 +295,96 @@ def create_opengl_video_renderer_class():
                 glClearColor(0.0, 0.0, 0.0, 1.0)
                 glClear(GL_COLOR_BUFFER_BIT)
 
-            if self._delay_buffer is None or self._texture_id is None:
+            # Check if we have a frame source (DelayBuffer or SHM)
+            if self._texture_id is None:
+                return
+            if self._delay_buffer is None and getattr(self, '_shm_reader', None) is None:
                 return
 
             with _profile_time('consume'):
                 try:
-                    result = self._delay_buffer.consume()
-                    if result is not None:
-                        self._frame_consume_count = getattr(self, '_frame_consume_count', 0) + 1
-                        new_frame = result.frame if hasattr(result, 'frame') else result
+                    new_frame = None
+                    frame_udp_time = 0  # Track UDP time for E2E latency
 
+                    # Try SHM reader first (multi-process mode)
+                    if hasattr(self, '_shm_reader') and self._shm_reader is not None:
+                        shm_read_start = time.time()
+                        result = self._shm_reader.read_frame_ex()
+                        shm_read_end = time.time()
+                        if result is not None:
+                            frame_bytes, pts, capture_time, udp_recv_time, fmt, w, h = result
+                            frame_udp_time = udp_recv_time
+                            self._frame_consume_count = getattr(self, '_frame_consume_count', 0) + 1
+
+                            # Calculate SHM read latency
+                            shm_read_ms = (shm_read_end - shm_read_start) * 1000
+
+                            # Debug first few frames
+                            if self._frame_consume_count <= 3:
+                                logger.info(f"[RENDER] SHM frame #{self._frame_consume_count}: len={len(frame_bytes)}, fmt={fmt}, w={w}, h={h}")
+
+                            # Convert NV12 bytes to Y/U/V dict format
+                            # NV12 layout: [Y plane (w*h)] [UV plane interleaved (w*h/2)]
+                            # frame_bytes is a 1D numpy array from read_frame_ex()
+                            if fmt == 1:  # NV12
+                                y_size = w * h
+                                # First convert to 2D array for easier slicing
+                                nv12_2d = frame_bytes.reshape((int(h * 1.5), w))
+                                y_plane = nv12_2d[:h, :].copy()
+                                uv_plane = nv12_2d[h:, :]
+                                u_plane = uv_plane[:, 0::2].copy()
+                                v_plane = uv_plane[:, 1::2].copy()
+
+                                # Debug: log data details
+                                if self._frame_consume_count <= 3:
+                                    # Check UV data distribution
+                                    u_left = u_plane[:, :u_plane.shape[1]//3]
+                                    u_right = u_plane[:, 2*u_plane.shape[1]//3:]
+                                    v_left = v_plane[:, :v_plane.shape[1]//3]
+                                    v_right = v_plane[:, 2*v_plane.shape[1]//3:]
+
+                                    # Check how many pixels are 0 in right region
+                                    u_right_zeros = np.sum(u_right == 0)
+                                    v_right_zeros = np.sum(v_right == 0)
+                                    u_right_total = u_right.size
+
+                                    logger.info(f"[SHM_DATA] frame#{self._frame_consume_count}: "
+                                               f"frame_bytes_len={len(frame_bytes)}, expected={int(w*h*1.5)}, "
+                                               f"nv12_2d_shape={nv12_2d.shape}, y_shape={y_plane.shape}, "
+                                               f"uv_shape={uv_plane.shape}, u_shape={u_plane.shape}, "
+                                               f"y_range=[{y_plane.min()},{y_plane.max()}], "
+                                               f"u_left_range=[{u_left.min()},{u_left.max()}], "
+                                               f"u_right_range=[{u_right.min()},{u_right.max()}], "
+                                               f"v_left_range=[{v_left.min()},{v_left.max()}], "
+                                               f"v_right_range=[{v_right.min()},{v_right.max()}], "
+                                               f"u_right_zeros={u_right_zeros}/{u_right_total} ({100*u_right_zeros/u_right_total:.1f}%), "
+                                               f"v_right_zeros={v_right_zeros}/{u_right_total} ({100*v_right_zeros/u_right_total:.1f}%)")
+
+                                new_frame = {
+                                    'y': y_plane,
+                                    'u': u_plane,
+                                    'v': v_plane,
+                                    'width': w,
+                                    'height': h,
+                                }
+                            else:  # RGB
+                                new_frame = frame_bytes.reshape((h, w, 3)).copy()
+
+                            # Log latency for multi-process mode
+                            e2e_ms = (time.time() - frame_udp_time) * 1000 if frame_udp_time > 0 else 0
+                            if self._frame_consume_count <= 5 or self._frame_consume_count % 30 == 0:  # Log first 5 and every 30 frames
+                                logger.info(f"[RENDER_LAG] frame#{self._frame_consume_count}: "
+                                           f"e2e={e2e_ms:.0f}ms, shm_read={shm_read_ms:.1f}ms")
+
+                    # Fallback to DelayBuffer (single-process mode)
+                    elif self._delay_buffer is not None:
+                        result = self._delay_buffer.consume()
+                        if result is not None:
+                            self._frame_consume_count = getattr(self, '_frame_consume_count', 0) + 1
+                            new_frame = result.frame if hasattr(result, 'frame') else result
+
+                    # Process the frame if we got one (COMMON CODE FOR BOTH SHM AND DelayBuffer)
+                    if new_frame is not None:
                         old_width, old_height = self._frame_width, self._frame_height
                         self._frame_array = new_frame
 
@@ -412,6 +500,7 @@ def create_opengl_video_renderer_class():
                         x: int, y: int, render_w: int, render_h: int) -> None:
             """Render NV12 frame using Y/U/V textures and GPU shader."""
             if not self._nv12_initialized or self._nv12_shader is None:
+                logger.warning(f"[PAINT_NV12] Not initialized: nv12_init={self._nv12_initialized}, shader={self._nv12_shader is not None}")
                 return
 
             # Handle NV12 data format
@@ -424,13 +513,24 @@ def create_opengl_video_renderer_class():
                     u_plane = frame_array['u']
                     v_plane = frame_array['v']
                     y_tex_width = y_plane.shape[1] if len(y_plane.shape) > 1 else width
+                    y_tex_height = y_plane.shape[0] if len(y_plane.shape) > 1 else height
                     uv_tex_width = u_plane.shape[1] if len(u_plane.shape) > 1 else width // 2
+                    uv_tex_height = u_plane.shape[0] if len(u_plane.shape) > 1 else height // 2
+
+                    # Debug first frame - detailed logging
+                    if not hasattr(self, '_nv12_first_frame_logged'):
+                        self._nv12_first_frame_logged = True
+                        logger.info(f"[PAINT_NV12] Dict format: y_shape={y_plane.shape}, u_shape={u_plane.shape}, v_shape={v_plane.shape}")
+                        logger.info(f"[PAINT_NV12] y_contiguous={y_plane.flags['C_CONTIGUOUS']}, u_contiguous={u_plane.flags['C_CONTIGUOUS']}")
+                        logger.info(f"[PAINT_NV12] y_tex={y_tex_width}x{y_tex_height}, uv_tex={uv_tex_width}x{uv_tex_height}")
+                        logger.info(f"[PAINT_NV12] Y range: [{y_plane.min()}, {y_plane.max()}], U range: [{u_plane.min()}, {u_plane.max()}]")
             else:
-                # Semi-planar NV12
-                y_plane = frame_array[:height, :]
+                # Semi-planar NV12 (2D array format: [Y plane; UV plane interleaved])
+                y_plane = frame_array[:height, :].copy()
                 uv_plane = frame_array[height:, :]
-                u_plane = uv_plane[::2, :]
-                v_plane = uv_plane[1::2, :]
+                # UV plane is interleaved: U0 V0 U1 V1 ... per row
+                u_plane = uv_plane[:, 0::2].copy()  # Even columns = U
+                v_plane = uv_plane[:, 1::2].copy()  # Odd columns = V
                 y_tex_width = frame_array.shape[1]
                 uv_tex_width = y_tex_width // 2
 
@@ -448,8 +548,15 @@ def create_opengl_video_renderer_class():
 
             y_size_changed = (self._nv12_y_tex_width != y_tex_width or
                               self._nv12_y_tex_height != height)
-            uv_size_changed = (self._nv12_uv_tex_width != uv_tex_width or
+            uv_size_changed = (self._nv12_uv_tex_width != uv_width or
                                self._nv12_uv_tex_height != uv_height)
+
+            # Debug: log texture dimensions on first frame or size change
+            if not hasattr(self, '_tex_debug_logged') or uv_size_changed:
+                self._tex_debug_logged = True
+                logger.info(f"[TEX_DEBUG] y_tex: {y_tex_width}x{height}, uv_tex: {uv_tex_width}x{uv_tex_height}, "
+                           f"uv_check: {uv_width}x{uv_height}, uv_changed={uv_size_changed}, "
+                           f"u_plane: {u_plane.shape}, v_plane: {v_plane.shape}")
 
             with _profile_time('tex_upload'):
                 # Y texture
@@ -574,9 +681,84 @@ def create_opengl_video_renderer_class():
         # ========================================================================
 
         def set_delay_buffer(self, delay_buffer: 'DelayBuffer') -> None:
-            """Set the DelayBuffer reference for direct frame consumption."""
+            """
+            Set the DelayBuffer reference for direct frame consumption.
+
+            Also sets up event-driven rendering: when a new frame is pushed to
+            DelayBuffer, this renderer will be notified immediately via Signal,
+            eliminating the need for 16ms polling.
+            """
             self._delay_buffer = delay_buffer
+            self._shm_reader = None  # Disable SHM mode
             logger.debug("OpenGLVideoRenderer DelayBuffer reference set")
+
+            # EVENT-DRIVEN RENDERING: Connect signal to render slot
+            if delay_buffer is not None:
+                # Connect our signal to the render method
+                self._frame_ready_signal.connect(self._on_frame_ready)
+                # Give the signal to DelayBuffer so it can emit from decoder thread
+                delay_buffer.set_frame_ready_signal(self._frame_ready_signal)
+                logger.info("[OPENGL_WINDOW] Event-driven rendering enabled (Signal connected)")
+                # Stop the polling timer - no longer needed
+                if self._update_timer is not None:
+                    self._update_timer.stop()
+                    logger.info("[OPENGL_WINDOW] Polling timer stopped (using event-driven mode)")
+
+        def _on_frame_ready(self) -> None:
+            """
+            Event-driven frame ready callback.
+
+            Called by DelayBuffer (via Qt's thread-safe mechanism) when a new
+            frame is available. This eliminates polling latency.
+
+            This method is called from the GUI thread via QTimer.singleShot.
+            """
+            self._frame_ready_count = getattr(self, '_frame_ready_count', 0) + 1
+            if self._frame_ready_count <= 5:
+                logger.info(f"[OPENGL_WINDOW] _on_frame_ready() called #{self._frame_ready_count}")
+
+            # Check if window is exposed before rendering
+            if not self.isExposed():
+                if self._frame_ready_count <= 5:
+                    logger.debug(f"[OPENGL_WINDOW] Window not exposed, skipping render")
+                return
+
+            # Trigger immediate render
+            try:
+                self.makeCurrent()
+                self.render()
+                if self.context():
+                    self.context().swapBuffers(self.context().surface())
+            except Exception as e:
+                logger.error(f"[OPENGL_WINDOW] Event-driven render error: {e}")
+            finally:
+                self.doneCurrent()
+
+        def set_shm_source(self, shm_name: str, shm_size: int,
+                          max_width: int = 4096, max_height: int = 4096) -> None:
+            """
+            Set shared memory source for multi-process frame reading.
+
+            When set, the renderer will read frames from SHM instead of DelayBuffer.
+            This enables multi-process architecture where the decoder runs in a
+            separate process.
+
+            Args:
+                shm_name: Name of shared memory
+                shm_size: Size of shared memory
+                max_width: Maximum frame width
+                max_height: Maximum frame height
+            """
+            from scrcpy_py_ddlx.simple_shm import SimpleSHMReader
+
+            self._shm_reader = SimpleSHMReader(
+                name=shm_name,
+                size=shm_size,
+                max_width=max_width,
+                max_height=max_height
+            )
+            self._delay_buffer = None  # Disable DelayBuffer mode
+            logger.info(f"[OPENGL_WINDOW] SHM source set: {shm_name}")
 
         def set_control_queue(self, queue: 'ControlMessageQueue') -> None:
             """Set the control message queue."""

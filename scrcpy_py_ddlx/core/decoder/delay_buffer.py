@@ -15,7 +15,7 @@ Features:
 import logging
 import time
 from threading import Lock, Condition
-from typing import Optional, Tuple, NamedTuple
+from typing import Optional, Tuple, NamedTuple, Callable
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,9 @@ class DelayBuffer:
         self._lock_wait_count = 0  # Track lock contention
         self._total_lock_wait_time = 0.0  # Total time spent waiting for lock
 
+        # Event-driven rendering: signal object (set by set_frame_ready_signal)
+        self._frame_ready_signal = None
+
     def push(self, frame, packet_id: int = -1, pts: int = 0, capture_time: float = 0.0,
              udp_recv_time: float = 0.0, send_time_ns: int = 0, width: int = 0, height: int = 0) -> Tuple[bool, bool]:
         """
@@ -98,7 +101,25 @@ class DelayBuffer:
             # Notify waiting consumer (event-driven, eliminates polling latency)
             self._condition.notify()
 
-            return True, previous_skipped
+        # EVENT-DRIVEN RENDERING: Emit signal to notify GUI thread
+        if self._frame_ready_signal is not None:
+            try:
+                self._frame_ready_signal.emit()
+            except Exception as e:
+                logger.debug(f"[DelayBuffer] Signal emit error: {e}")
+
+        return True, previous_skipped
+
+    def set_frame_ready_signal(self, signal) -> None:
+        """
+        Set the Qt signal for event-driven rendering.
+
+        Args:
+            signal: A Qt Signal object that will be emitted when a frame is ready.
+                    The signal must be thread-safe (Qt handles this automatically).
+        """
+        self._frame_ready_signal = signal
+        logger.info("[DelayBuffer] Frame ready signal set for event-driven rendering")
 
     def wait_for_frame(self, timeout: float = 0.001) -> Optional[FrameWithMetadata]:
         """
