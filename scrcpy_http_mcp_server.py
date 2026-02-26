@@ -2005,6 +2005,14 @@ class ScrcpyMCPHandler:
                                         logger.info("Direct SHM mode enabled: GPU NV12 rendering")
                                         # Start control event reader (separate from frame sender)
                                         self._start_control_event_reader()
+
+                                        # CRITICAL: Request a new keyframe after setting shm_writer
+                                        # This ensures a frame is written to shared memory immediately,
+                                        # preventing black screen when VBR mode has paused output due to static screen.
+                                        # Without this, preview window may stay black until user interacts with device.
+                                        if hasattr(self._client, 'reset_video'):
+                                            self._client.reset_video()
+                                            logger.info("Preview: Requested keyframe after shm_writer setup (triggers frame output)")
                                     except Exception as e:
                                         decoder._output_nv12 = False
                                         logger.warning(f"GPU NV12 not available, falling back to CPU: {e}")

@@ -13,8 +13,10 @@
 | [编码器检测修复](encoder_detection_fix.md) | --list-encoders 无法识别 H265 | ✅ 已修复 |
 | [QOpenGLWindow 输入修复](../preview_optimization/qopenglwindow_input_fix.md) | 预览窗口触摸/键盘/字符输入失效 | ✅ 已修复 |
 | [VBR 静止画面兼容](vbr_static_frame_stall.md) | VBR 模式静止画面导致客户端断开 | ✅ 已修复 |
+| [预览窗口黑屏修复](preview_black_screen_fix.md) | 预览窗口启动时黑屏，需点击才显示 | ✅ 已修复 |
 | [Direct SHM 截图修复](direct_shm_screenshot_fix.md) | Direct SHM 模式截图返回 No frame available | ✅ 已修复 |
 | [横屏触摸修复](landscape_touch_fix.md) | MCP 预览窗口横屏模式触摸失效 | ✅ 已修复 |
+| [Windows 端口 3359](port_3359_windows.md) | Windows Hyper-V 保留端口导致服务器无法启动 | ✅ 已修复 |
 | [音频录制指南](../AUDIO_RECORDING_GUIDE.md) | 音频录制功能实现与常见问题 | 📖 指南 |
 | [调试方法论](../DEBUG_METHODOLOGY.md) | 高效调试问题的通用方法 | 📖 指南 |
 

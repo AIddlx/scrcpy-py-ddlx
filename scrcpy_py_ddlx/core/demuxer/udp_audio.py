@@ -234,17 +234,15 @@ class UdpAudioDemuxer:
                     self._process_packet(packet)
 
                 except socket.timeout:
-                    # Check for server disconnect
+                    # UDP timeout - this is NORMAL in network mode when screen is static
+                    # Audio may also pause when screen is static
+                    # Disconnect detection is handled by TCP heartbeat, NOT by UDP timeout
                     self._consecutive_timeouts += 1
-                    if self._consecutive_timeouts >= self.MAX_CONSECUTIVE_TIMEOUTS:
-                        # Only treat as disconnect if we've received at least one packet
-                        if self._last_packet_time > 0:
-                            elapsed = time.time() - self._last_packet_time
-                            logger.error(
-                                f"Server disconnect detected: no audio data for {elapsed:.1f}s "
-                                f"({self._consecutive_timeouts} consecutive timeouts)"
-                            )
-                            break
+                    if self._consecutive_timeouts % 10 == 0:
+                        logger.debug(
+                            f"No audio data for {self._consecutive_timeouts}s - "
+                            f"static screen or network issue"
+                        )
                     continue
                 except OSError as e:
                     if not self._stopped.is_set():

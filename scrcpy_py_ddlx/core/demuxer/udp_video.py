@@ -327,17 +327,17 @@ class UdpVideoDemuxer:
                             logger.info(f"[SIMULATE_DROP] Dropped packet #{self._simulated_drops} (rate={self._drop_rate:.1%})")
                         continue  # Skip processing this packet
 
-                    # Check data gap (time since last packet)
+                    # Check data gap (for logging only - do NOT disconnect on UDP timeout)
+                    # VBR mode may stop output when screen is static - this is NORMAL
+                    # Disconnect detection is handled by TCP heartbeat only
                     now = time.time()
                     if self._last_packet_time > 0:
                         gap = now - self._last_packet_time
-                        if gap > self.MAX_DATA_GAP:
-                            logger.error(
-                                f"Server disconnect detected: data gap {gap:.1f}s > {self.MAX_DATA_GAP}s"
+                        if gap > self.MAX_DATA_GAP and gap < 30:  # Log once per 30s max
+                            logger.info(
+                                f"No video data for {gap:.1f}s - static screen or network issue "
+                                f"(TCP heartbeat handles disconnect detection)"
                             )
-                            # Update last packet time before breaking
-                            self._last_packet_time = now
-                            break
 
                     # Update last packet time
                     self._last_packet_time = now
@@ -356,20 +356,15 @@ class UdpVideoDemuxer:
                             logger.warning(f"[GIL_CONTENTION] UDP process delay: current={process_time:.1f}ms, avg={avg_time:.1f}ms, count={_gil_contention_count}")
 
                 except socket.timeout:
-                    # Check for server disconnect
+                    # UDP timeout - this is NORMAL in network mode when screen is static
+                    # VBR encoder may stop output when there's no screen change
+                    # Disconnect detection is handled by TCP heartbeat, NOT by UDP timeout
                     self._consecutive_timeouts += 1
-                    logger.debug(
-                        f"Socket timeout #{self._consecutive_timeouts}/{self.MAX_CONSECUTIVE_TIMEOUTS}"
-                    )
-                    if self._consecutive_timeouts >= self.MAX_CONSECUTIVE_TIMEOUTS:
-                        # Only treat as disconnect if we've received at least one packet
-                        if self._last_packet_time > 0:
-                            elapsed = time.time() - self._last_packet_time
-                            logger.error(
-                                f"Server disconnect detected: no video data for {elapsed:.1f}s "
-                                f"({self._consecutive_timeouts} consecutive timeouts)"
-                            )
-                            break
+                    if self._consecutive_timeouts % 10 == 0:
+                        logger.debug(
+                            f"No video data for {self._consecutive_timeouts}s - "
+                            f"static screen (VBR mode) or network issue"
+                        )
                     continue
                 except OSError as e:
                     if not self._stopped.is_set():
