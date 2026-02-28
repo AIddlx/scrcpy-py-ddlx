@@ -136,13 +136,23 @@ client.screenshot()  # 内部调用 request_video_frame
 ```
 
 ### 场景 3：网络模式截图（video=False）
+
+> **注意**：此场景现已使用 `ScreenshotCapture` 实现，不再依赖编码器。
+> 详见 [SurfaceControl 截图限制](known_issues/surfacecontrol_screenshot_limitation.md)
+
 ```python
 # MCP 服务器场景
 connect(connection_mode="network", video=False)
 
 # 截图时
-screenshot()  # 自动发送 REQUEST_VIDEO_FRAME
+screenshot()  # 使用 ScreenshotCapture (VirtualDisplay + ImageReader)
 ```
+
+**实现原理**：
+- 服务端在 `video=false` 时创建 `ScreenshotCapture`
+- `ScreenshotCapture` 使用 SurfaceControl API 创建 VirtualDisplay
+- 帧输出到 ImageReader，直接转换为 JPEG 返回
+- 不经过编码器，延迟更低 (~70-120ms)
 
 ## 实现步骤
 

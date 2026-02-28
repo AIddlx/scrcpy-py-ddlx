@@ -17,6 +17,7 @@
 | [Direct SHM 截图修复](direct_shm_screenshot_fix.md) | Direct SHM 模式截图返回 No frame available | ✅ 已修复 |
 | [横屏触摸修复](landscape_touch_fix.md) | MCP 预览窗口横屏模式触摸失效 | ✅ 已修复 |
 | [Windows 端口 3359](port_3359_windows.md) | Windows Hyper-V 保留端口导致服务器无法启动 | ✅ 已修复 |
+| [SurfaceControl 截图限制](surfacecontrol_screenshot_limitation.md) | --push 模式 (video=false) 截图失败 | ✅ 已修复 |
 | [音频录制指南](../AUDIO_RECORDING_GUIDE.md) | 音频录制功能实现与常见问题 | 📖 指南 |
 | [调试方法论](../DEBUG_METHODOLOGY.md) | 高效调试问题的通用方法 | 📖 指南 |
 

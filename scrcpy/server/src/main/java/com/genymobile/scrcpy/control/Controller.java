@@ -17,6 +17,7 @@ import com.genymobile.scrcpy.video.CaptureReset;
 import com.genymobile.scrcpy.video.SurfaceEncoder;
 import com.genymobile.scrcpy.video.VirtualDisplayListener;
 import com.genymobile.scrcpy.audio.AudioEncoder;
+import com.genymobile.scrcpy.file.FileServer;
 import com.genymobile.scrcpy.wrappers.ClipboardManager;
 import com.genymobile.scrcpy.wrappers.InputManager;
 import com.genymobile.scrcpy.wrappers.ServiceManager;
@@ -110,6 +111,12 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     private SurfaceEncoder surfaceEncoder;
     private AudioEncoder audioEncoder;
 
+    // Used for screenshot in video=false mode (network mode)
+    private com.genymobile.scrcpy.video.ScreenshotCapture screenshotCapture;
+
+    // Used for file transfer (independent TCP file channel)
+    private FileServer fileServer;
+
     public Controller(ControlChannel controlChannel, CleanUp cleanUp, Options options) {
         this.displayId = options.getDisplayId();
         this.controlChannel = controlChannel;
@@ -172,6 +179,10 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
 
     public void setAudioEncoder(AudioEncoder audioEncoder) {
         this.audioEncoder = audioEncoder;
+    }
+
+    public void setScreenshotCapture(com.genymobile.scrcpy.video.ScreenshotCapture screenshotCapture) {
+        this.screenshotCapture = screenshotCapture;
     }
 
     private UhidManager getUhidManager() {
@@ -267,6 +278,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
             thread.interrupt();
         }
         sender.stop();
+        if (fileServer != null) {
+            fileServer.stop();
+        }
     }
 
     @Override
@@ -357,7 +371,7 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
                 getAppListAsync();
                 break;
             case ControlMessage.TYPE_SCREENSHOT:
-                takeScreenshotAsync();
+                takeScreenshotAsync(msg.getQuality());
                 break;
             case ControlMessage.TYPE_REQUEST_VIDEO_FRAME:
                 requestVideoFrame();
@@ -376,6 +390,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
                 break;
             case ControlMessage.TYPE_PING:
                 handlePing(msg.getTimestamp());
+                break;
+            case ControlMessage.TYPE_OPEN_FILE_CHANNEL:
+                openFileChannel();
                 break;
             default:
                 // do nothing
@@ -822,51 +839,95 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         Ln.i("App list sent: " + apps.size() + " apps");
     }
 
-    private void takeScreenshotAsync() {
+    private void takeScreenshotAsync(int quality) {
         if (startAppExecutor == null) {
             startAppExecutor = Executors.newSingleThreadExecutor();
         }
         // Taking screenshot may take time, execute asynchronously
-        startAppExecutor.submit(() -> takeScreenshot());
+        final int q = quality;
+        startAppExecutor.submit(() -> takeScreenshot(q));
     }
 
     /**
-     * Take a screenshot via SurfaceControl API and send it to the client.
-     * This works even when video is in lazy decode mode (decoder paused).
+     * Take a screenshot and send it to the client.
+     * Priority: ScreenshotCapture > SurfaceControl.screenshot()
+     * @param quality JPEG quality (1-100)
      */
-    private void takeScreenshot() {
+    private void takeScreenshot(int quality) {
         try {
-            // Get display info from DisplayManager (compatible with API 21+)
-            DisplayInfo displayInfo = ServiceManager.getDisplayManager().getDisplayInfo(displayId);
-            if (displayInfo == null) {
-                Ln.e("Screenshot failed: display not found");
-                sendEmptyScreenshot();
-                return;
-            }
-            int width = displayInfo.getSize().getWidth();
-            int height = displayInfo.getSize().getHeight();
+            android.graphics.Bitmap bitmap = null;
 
-            // Take screenshot using SurfaceControl
-            android.graphics.Bitmap bitmap = com.genymobile.scrcpy.wrappers.SurfaceControl.screenshot(width, height);
+            // Priority 1: Use ScreenshotCapture if available (video=false mode)
+            if (screenshotCapture != null) {
+                Ln.i("Taking screenshot via ScreenshotCapture");
+                bitmap = screenshotCapture.captureScreenshot(2000); // 2 second timeout
+            }
+
+            // Priority 2: Use SurfaceControl.screenshot()
             if (bitmap == null) {
-                Ln.e("Screenshot failed: SurfaceControl.screenshot returned null");
+                DisplayInfo displayInfo = ServiceManager.getDisplayManager().getDisplayInfo(displayId);
+                if (displayInfo == null) {
+                    Ln.e("Screenshot failed: display not found");
+                    sendEmptyScreenshot();
+                    return;
+                }
+                int width = displayInfo.getSize().getWidth();
+                int height = displayInfo.getSize().getHeight();
+
+                Ln.i("Taking screenshot via SurfaceControl");
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    bitmap = com.genymobile.scrcpy.wrappers.SurfaceControl.screenshot(width, height);
+                    if (bitmap != null) {
+                        break;
+                    }
+                    Ln.w("SurfaceControl screenshot attempt " + (attempt + 1) + " failed, retrying...");
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+            }
+
+            if (bitmap == null) {
+                Ln.e("Screenshot failed: all methods returned null");
                 sendEmptyScreenshot();
                 return;
             }
 
-            // Compress to JPEG
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            boolean compressed = bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos);
+            // Compress to JPEG with dynamic quality to fit in max size
+            final int max_size = DeviceMessageWriter.SCREENSHOT_MAX_SIZE;
+            byte[] jpegData = null;
+            int currentQuality = quality;
+
+            // Try reducing quality until it fits
+            while (currentQuality >= 30) {
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                boolean compressed = bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, currentQuality, baos);
+
+                if (compressed) {
+                    jpegData = baos.toByteArray();
+                    if (jpegData.length <= max_size) {
+                        break; // Fits in limit
+                    }
+                    // Too large, reduce quality
+                    Ln.d("Screenshot size " + jpegData.length + " exceeds limit " + max_size + ", reducing quality to " + (currentQuality - 10));
+                    currentQuality -= 10;
+                    jpegData = null;
+                } else {
+                    break;
+                }
+            }
+
             bitmap.recycle();
 
-            if (!compressed) {
-                Ln.e("Screenshot failed: JPEG compression failed");
+            if (jpegData == null || jpegData.length > max_size) {
+                Ln.e("Screenshot failed: could not compress to fit in " + max_size + " bytes (final size: " + (jpegData != null ? jpegData.length : 0) + ")");
                 sendEmptyScreenshot();
                 return;
             }
 
-            byte[] jpegData = baos.toByteArray();
-            Ln.i("Screenshot taken: " + width + "x" + height + ", size=" + jpegData.length + " bytes");
+            Ln.i("Screenshot taken: " + bitmap.getWidth() + "x" + bitmap.getHeight() + ", size=" + jpegData.length + " bytes, quality=" + currentQuality);
 
             // Send to client
             DeviceMessage msg = DeviceMessage.createScreenshot(jpegData);
@@ -937,5 +998,23 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         DeviceMessage pong = DeviceMessage.createPong(timestamp);
         sender.send(pong);
         Ln.d("Heartbeat: PING received, PONG sent (timestamp=" + timestamp + ")");
+    }
+
+    // File channel handling
+
+    private void openFileChannel() {
+        try {
+            if (fileServer == null) {
+                fileServer = new FileServer();
+            }
+            int port = fileServer.start();
+            int sessionId = fileServer.getSessionId();
+
+            DeviceMessage msg = DeviceMessage.createFileChannelInfo(port, sessionId);
+            sender.send(msg);
+            Ln.i("File channel opened: port=" + port + ", sessionId=" + sessionId);
+        } catch (Exception e) {
+            Ln.e("Failed to open file channel", e);
+        }
     }
 }

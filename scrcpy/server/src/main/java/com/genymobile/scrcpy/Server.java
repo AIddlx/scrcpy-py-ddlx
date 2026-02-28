@@ -25,6 +25,7 @@ import com.genymobile.scrcpy.util.LogUtils;
 import com.genymobile.scrcpy.video.CameraCapture;
 import com.genymobile.scrcpy.video.NewDisplayCapture;
 import com.genymobile.scrcpy.video.ScreenCapture;
+import com.genymobile.scrcpy.video.ScreenshotCapture;
 import com.genymobile.scrcpy.video.SurfaceCapture;
 import com.genymobile.scrcpy.video.SurfaceEncoder;
 import com.genymobile.scrcpy.video.VideoSource;
@@ -377,6 +378,21 @@ public final class Server {
                     controller.setSurfaceCapture(surfaceCapture);
                     controller.setSurfaceEncoder(surfaceEncoder);
                     controller.setCaptureReset(surfaceEncoder.getCaptureReset());
+                }
+            } else if (networkMode && control) {
+                // In network mode with video=false, create ScreenshotCapture for screenshot support
+                // This creates a VirtualDisplay without encoding, just for capturing screenshots
+                try {
+                    ScreenshotCapture screenshotCapture = new ScreenshotCapture(options);
+                    screenshotCapture.init();
+                    Ln.i("ScreenshotCapture initialized for screenshot support (video=false mode)");
+
+                    if (controller != null) {
+                        controller.setScreenshotCapture(screenshotCapture);
+                    }
+                } catch (Exception e) {
+                    Ln.e("Failed to initialize ScreenshotCapture: " + e.getMessage());
+                    // Continue without screenshot support
                 }
             }
 
