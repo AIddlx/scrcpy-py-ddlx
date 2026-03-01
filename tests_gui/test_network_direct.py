@@ -11,26 +11,45 @@ Usage:
     python -X utf8 tests_gui/test_network_direct.py [options]
 
 Examples:
-    # Auto-detect device IP (recommended)
+    # Auto-detect device IP via ADB (need USB first time)
     python -X utf8 tests_gui/test_network_direct.py
 
     # Custom device IP
     python -X utf8 tests_gui/test_network_direct.py --ip 192.168.1.100
 
-    # Fast reconnect mode (reuse server, no push)
+    # UDP Discovery - find servers in LAN (no USB needed)
+    python -X utf8 tests_gui/test_network_direct.py --discover
+
+    # Hot connect - server must be running, skip all ADB (no USB needed)
+    python -X utf8 tests_gui/test_network_direct.py --hot-connect --ip 192.168.5.4
+
+    # Fast reconnect mode (reuse server, no push) - need USB for server check
     python -X utf8 tests_gui/test_network_direct.py --reuse --no-push
 
     # Enable frame-level FEC (K frames per group)
     python -X utf8 tests_gui/test_network_direct.py --fec frame
 
-    # Enable fragment-level FEC (K fragments per group)
-    python -X utf8 tests_gui/test_network_direct.py --fec fragment
-
     # Full custom config with FEC
     python -X utf8 tests_gui/test_network_direct.py --ip 192.168.5.4 --fec frame --fec-k 8 --fec-m 2
 
-NOTE: ADB is only used to START the server. After server is running, you can unplug USB
-      and the connection will continue via WiFi (TCP control + UDP video).
+Connection Modes:
+    1. First time (need USB):
+       python test_network_direct.py
+       - ADB detects device IP
+       - ADB pushes and starts server
+       - Then you can unplug USB
+
+    2. Subsequent connections (no USB needed):
+       python test_network_direct.py --hot-connect --ip 192.168.5.4
+       - OR use --discover to find servers in LAN
+       - Skips all ADB operations
+       - Connects directly via TCP/UDP
+
+    3. With USB but reuse server:
+       python test_network_direct.py --reuse --no-push
+       - ADB checks if server running
+       - If running, skips push/start
+       - If not running, fails (need USB to start)
 """
 
 import sys
@@ -46,6 +65,30 @@ from datetime import datetime
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+
+def discover_network_devices(timeout: float = 3.0, port: int = 27183):
+    """
+    Discover scrcpy servers in the local network using UDP broadcast.
+
+    Args:
+        timeout: Discovery timeout in seconds
+        port: UDP discovery port (default: 27183)
+
+    Returns:
+        List of discovered devices: [{"ip": "...", "name": "..."}, ...]
+    """
+    try:
+        from scrcpy_py_ddlx.client.udp_wake import discover_devices as udp_discover
+        print(f"[INFO] Scanning network for scrcpy servers (timeout: {timeout}s)...")
+        devices = udp_discover(timeout=timeout, port=port)
+        return devices
+    except ImportError as e:
+        print(f"[ERROR] Failed to import discovery module: {e}")
+        return []
+    except Exception as e:
+        print(f"[ERROR] Discovery failed: {e}")
+        return []
 
 
 def get_device_serial():
@@ -134,13 +177,23 @@ Server Lifecycle Modes:
     # Network settings
     net_group = parser.add_argument_group('Network Settings')
     net_group.add_argument('--ip', dest='device_ip', default=None,
-                           help='Device IP address (default: auto-detect via ADB)')
+                           help='Device IP address (default: auto-detect via ADB or --discover)')
     net_group.add_argument('--control-port', type=int, default=27184,
                            help='TCP control port (default: 27184)')
     net_group.add_argument('--video-port', type=int, default=27185,
                            help='UDP video port (default: 27185)')
     net_group.add_argument('--audio-port', type=int, default=27186,
                            help='UDP audio port (default: 27186)')
+
+    # Discovery and hot-connect modes
+    connect_group = parser.add_argument_group('Connection Modes (No USB Required)')
+    connect_group.add_argument('--discover', dest='discover_mode', action='store_true',
+                               help='Use UDP broadcast to discover servers in LAN (no USB needed)')
+    connect_group.add_argument('--discover-timeout', type=float, default=3.0,
+                               help='UDP discovery timeout in seconds (default: 3.0)')
+    connect_group.add_argument('--hot-connect', dest='hot_connect', action='store_true',
+                               help='Hot connect mode: skip all ADB operations, connect directly. '
+                                    'Server must be running. Use with --ip or after --discover.')
 
     # FEC settings
     fec_group = parser.add_argument_group('FEC Settings')
@@ -242,6 +295,8 @@ Server Lifecycle Modes:
                            help='Enable verbose output')
     dbg_group.add_argument('-q', '--quiet', action='store_true',
                            help='Quiet mode (warnings only)')
+    dbg_group.add_argument('--no-tracker', dest='no_tracker', action='store_true',
+                           help='Disable latency tracker to save CPU')
     dbg_group.add_argument('--show-details', dest='show_details', action='store_true',
                            help='Show detailed encoder info after connection')
     dbg_group.add_argument('--drop-rate', dest='drop_rate', type=float, default=0.0,
@@ -629,8 +684,9 @@ def start_server(args, device_serial: str = None):
         f"video=true {audio_params} control=true send_device_meta=true send_dummy_byte=true cleanup=false"
     )
 
-    # Wrap with nohup and sh -c for proper background execution
-    cmd = f"nohup sh -c '{server_cmd}' > /data/local/tmp/scrcpy_server.log 2>&1 &"
+    # Wrap with nohup and setsid to survive ADB disconnection
+    # setsid creates a new session, detaching from ADB shell process group
+    cmd = f"nohup setsid sh -c '{server_cmd}' > /data/local/tmp/scrcpy_server.log 2>&1 &"
 
     # Start server with nohup so it survives ADB disconnection
     result = subprocess.run(
@@ -654,31 +710,41 @@ def start_server(args, device_serial: str = None):
 def setup_logging(args):
     """Configure logging based on arguments."""
     if args.quiet:
-        level = logging.WARNING
+        file_level = logging.WARNING
+        console_level = logging.WARNING
     elif args.verbose:
-        level = logging.DEBUG
+        file_level = logging.DEBUG
+        console_level = logging.DEBUG
     else:
-        level = logging.DEBUG  # Default to debug for file, will adjust console
+        file_level = logging.DEBUG  # Default: DEBUG for debugging
+        console_level = logging.INFO
 
-    # Put logs in test_logs directory
-    log_dir = project_root / "test_logs"
-    log_dir.mkdir(exist_ok=True)
+    # Put logs in user cache directory (same as MCP server)
+    log_dir = Path.home() / ".cache" / "scrcpy-py-ddlx" / "logs" / "test_gui_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_filename = str(log_dir / f"scrcpy_network_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
-    handlers = [
-        logging.FileHandler(log_filename, encoding='utf-8'),
-    ]
+    # File handler with appropriate level
+    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+    file_handler.setLevel(file_level)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
     # Console handler with appropriate level
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG if args.verbose else logging.INFO)
-    handlers.append(console_handler)
+    console_handler.setLevel(console_level)
+    console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
 
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=handlers
-    )
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Allow all levels, handlers filter
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    # Disable latency tracker if requested
+    if getattr(args, 'no_tracker', False):
+        from scrcpy_py_ddlx.latency_tracker import disable_tracker
+        disable_tracker()
+        print("[INFO] Latency tracker disabled")
 
     return log_filename
 
@@ -687,6 +753,97 @@ def main():
     """Test network mode connection"""
     args = parse_args()
 
+    # ========== Mode 1: UDP Discovery (no USB needed) ==========
+    if args.discover_mode:
+        print("=" * 60)
+        print("UDP Discovery Mode")
+        print("=" * 60)
+        print("[INFO] Broadcasting discovery request...")
+        print(f"[INFO] Timeout: {args.discover_timeout}s")
+
+        devices = discover_network_devices(timeout=args.discover_timeout)
+
+        if not devices:
+            print("[ERROR] No servers found in network")
+            print("[INFO] Make sure:")
+            print("  - Server is running on device (stay-alive mode)")
+            print("  - Device and PC are on the same network")
+            print("  - Firewall allows UDP port 27183")
+            return
+
+        print(f"\n[SUCCESS] Found {len(devices)} server(s):")
+        for i, dev in enumerate(devices):
+            ip = dev.get('ip', 'unknown')
+            name = dev.get('name', 'Unknown')
+            print(f"  {i+1}. {ip} - {name}")
+
+        # Auto-select first device
+        args.device_ip = devices[0].get('ip')
+        print(f"\n[INFO] Auto-selecting: {args.device_ip}")
+        print("[INFO] Connecting in hot-connect mode...")
+
+        # Fall through to hot-connect mode
+        args.hot_connect = True
+
+    # ========== Mode 2: Hot Connect (no USB, skip all ADB) ==========
+    if getattr(args, 'hot_connect', False):
+        # Auto-discover if no IP specified
+        if not args.device_ip:
+            print("=" * 60)
+            print("Hot Connect Mode - Auto Discovery")
+            print("=" * 60)
+            print("[INFO] No IP specified, discovering servers...")
+            devices = discover_network_devices(timeout=args.discover_timeout)
+            if not devices:
+                print("[ERROR] No servers found in network")
+                print("[INFO] Make sure:")
+                print("  - Server is running on device (stay-alive mode)")
+                print("  - Device and PC are on the same network")
+                print("  - Firewall allows UDP port 27183")
+                return
+            print(f"[INFO] Found {len(devices)} server(s):")
+            for i, dev in enumerate(devices):
+                ip = dev.get('ip', 'unknown')
+                name = dev.get('name', 'Unknown')
+                print(f"  {i+1}. {ip} - {name}")
+            args.device_ip = devices[0].get('ip')
+            print(f"[INFO] Auto-selecting: {args.device_ip}")
+
+        print("=" * 60)
+        print("Hot Connect Mode (No USB Required)")
+        print("=" * 60)
+        print(f"[INFO] Target IP: {args.device_ip}")
+        print("[INFO] Skipping all ADB operations")
+        print("[INFO] Server must be running on device")
+
+        # Setup logging for hot-connect mode
+        log_filename = setup_logging(args)
+        print(f"[INFO] Log file: {log_filename}")
+
+        # Check for auth key locally
+        if args.auth_enabled:
+            try:
+                from scrcpy_py_ddlx.core.auth import load_auth_key
+                auth_key = load_auth_key(args.device_ip)
+                if auth_key:
+                    print(f"[INFO] Auth key found for {args.device_ip}")
+                else:
+                    print(f"[WARN] No auth key found for {args.device_ip}")
+                    print("[WARN] If server requires auth, connection will fail")
+                    print("[WARN] Use --no-auth if server was started without auth")
+            except Exception as e:
+                print(f"[WARN] Could not check auth key: {e}")
+
+        # Use default codec for hot connect (can't query device)
+        if args.video_codec == 'auto':
+            print("[INFO] Hot connect mode: using H264 (safe default)")
+            args.video_codec = 'h264'
+
+        # Skip to client creation
+        run_client(args, device_serial=None, log_filename=log_filename)
+        return
+
+    # ========== Mode 3: ADB-based connection (original flow) ==========
     # Auto-detect device IP if not specified
     if args.device_ip is None:
         print("[INFO] Auto-detecting device IP via ADB...")
@@ -695,8 +852,10 @@ def main():
             print(f"[INFO] Detected device IP: {args.device_ip}")
         else:
             print("[ERROR] Could not auto-detect device IP!")
-            print("[ERROR] Please specify IP with --ip option, e.g.:")
-            print("[ERROR]   python tests_gui/test_network_direct.py --ip 192.168.1.100")
+            print("[ERROR] Options:")
+            print("[ERROR]   1. Connect via USB and try again")
+            print("[ERROR]   2. Use --discover to find servers in network")
+            print("[ERROR]   3. Use --hot-connect --ip <IP> if server is running")
             return
 
     # Get device serial for authentication
@@ -737,6 +896,27 @@ def main():
     log_filename = setup_logging(args)
     logger = logging.getLogger(__name__)
     print(f"[INFO] Log file: {log_filename}")
+
+    # Check/start server
+    print()
+    print(f"[INFO] Server lifecycle: REUSE_SERVER={args.reuse_server}, PUSH_SERVER={args.push_server}, WAKE_SERVER={args.wake_server}")
+
+    server_running = check_server_running()
+    if server_running:
+        if args.reuse_server:
+            print("[INFO] Found running server (will reuse)")
+        else:
+            print("[INFO] Found running server (will restart)")
+
+    if not start_server(args, device_serial):
+        return
+
+    # Run client
+    run_client(args, device_serial, log_filename)
+
+
+def run_client(args, device_serial: str = None, log_filename: str = None):
+    """Run the scrcpy client with the given configuration."""
 
     print("=" * 60)
     print("scrcpy-py-ddlx Network Mode Test")
@@ -814,20 +994,6 @@ def main():
         print(f"[FAIL] Import failed: {e}")
         return
 
-    # Check/start server
-    print()
-    print(f"[INFO] Server lifecycle: REUSE_SERVER={args.reuse_server}, PUSH_SERVER={args.push_server}, WAKE_SERVER={args.wake_server}")
-
-    server_running = check_server_running()
-    if server_running:
-        if args.reuse_server:
-            print("[INFO] Found running server (will reuse)")
-        else:
-            print("[INFO] Found running server (will restart)")
-
-    if not start_server(args, device_serial):
-        return
-
     # Create client config for network mode
     print("\nCreating network mode client...")
     config = ClientConfig(
@@ -880,6 +1046,9 @@ def main():
         audio=args.audio_enabled,  # Enable audio if requested
         audio_dup=args.audio_dup,  # Duplicate audio on device and computer
 
+        # Authentication (network mode)
+        auth_enabled=args.auth_enabled,
+
         # Display settings
         show_window=True,
         control=True,
@@ -909,7 +1078,11 @@ def main():
     print("\nConnecting to device...")
 
     try:
-        client.connect()
+        if not client.connect():
+            print(f"\n{'=' * 50}")
+            print(f"[ERROR] Connection failed!")
+            print(f"{'=' * 50}")
+            return
 
         print(f"\n{'=' * 50}")
         print(f"[SUCCESS] Connected via NETWORK MODE!")
@@ -948,24 +1121,37 @@ def main():
         except:
             pass
 
-        # Save server log (from device) - useful for debugging
-        try:
-            server_log_filename = log_filename.replace('.log', '_server.log')
-            print(f"[INFO] Saving server log to: {server_log_filename}")
-            result = subprocess.run(
-                ['adb', 'logcat', '-d', '-s', 'scrcpy:*'],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                with open(server_log_filename, 'w', encoding='utf-8') as f:
-                    f.write(f"# Server log captured at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"# Test log: {log_filename}\n\n")
-                    f.write(result.stdout)
-                print(f"[INFO] Server log saved ({len(result.stdout)} bytes)")
-            else:
-                print("[INFO] No server log available")
-        except Exception as e:
-            print(f"[WARN] Could not save server log: {e}")
+        # Save server log (from device) - only if ADB is available
+        if log_filename:
+            try:
+                # Check if ADB is available (device connected)
+                check_result = subprocess.run(
+                    ['adb', 'devices'],
+                    capture_output=True, text=True, timeout=5
+                )
+                has_device = 'device' in check_result.stdout and '\tdevice' in check_result.stdout
+
+                if has_device:
+                    server_log_filename = log_filename.replace('.log', '_server.log')
+                    print(f"[INFO] Saving server log to: {server_log_filename}")
+                    result = subprocess.run(
+                        ['adb', 'logcat', '-d', '-s', 'scrcpy:*'],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        with open(server_log_filename, 'w', encoding='utf-8') as f:
+                            f.write(f"# Server log captured at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                            f.write(f"# Test log: {log_filename}\n\n")
+                            f.write(result.stdout)
+                        print(f"[INFO] Server log saved ({len(result.stdout)} bytes)")
+                    else:
+                        print("[INFO] No server log available")
+                else:
+                    print("[INFO] Skipping server log (no ADB device connected)")
+            except subprocess.TimeoutExpired:
+                print("[INFO] Skipping server log (ADB timeout)")
+            except Exception as e:
+                print(f"[INFO] Skipping server log: {e}")
 
         print("Test completed")
 

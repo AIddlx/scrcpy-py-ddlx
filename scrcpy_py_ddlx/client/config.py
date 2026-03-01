@@ -110,6 +110,9 @@ class ClientConfig:
     file_port: int = 27187  # TCP file transfer port (network mode)
     discovery_port: int = 27183  # UDP discovery port
 
+    # Authentication (network mode)
+    auth_enabled: bool = True  # Enable HMAC-SHA256 authentication
+
     # FEC (Forward Error Correction) settings for UDP mode
     fec_enabled: bool = False  # Legacy: Enable FEC for both video and audio
     video_fec_enabled: bool = False  # Enable FEC for video stream only

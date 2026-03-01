@@ -1217,17 +1217,21 @@ class ScrcpyClient:
             if not wake_device(host, self.config.discovery_port):
                 logger.warning(f"Failed to wake device at {host}, trying direct connect...")
 
-            # Load authentication key if available
+            # Load authentication key if auth is enabled
             # Auth key is identified by device IP (host)
             auth_key = None
-            try:
-                auth_key = load_auth_key(host)
-                if auth_key:
-                    logger.info(f"Auth key loaded for {host}, will perform authentication")
-                else:
-                    logger.debug(f"No auth key found for {host}, connecting without auth")
-            except AuthError as e:
-                logger.warning(f"Failed to load auth key: {e}, connecting without auth")
+            auth_enabled = getattr(self.config, 'auth_enabled', True)
+            if auth_enabled:
+                try:
+                    auth_key = load_auth_key(host)
+                    if auth_key:
+                        logger.info(f"Auth key loaded for {host}, will perform authentication")
+                    else:
+                        logger.warning(f"No auth key found for {host}, but server may require auth")
+                except AuthError as e:
+                    logger.warning(f"Failed to load auth key: {e}")
+            else:
+                logger.info("Authentication disabled by config (auth_enabled=False)")
 
             # Setup network connection with file port and optional auth
             file_port = getattr(self.config, 'file_port', 27187)
@@ -1271,6 +1275,10 @@ class ScrcpyClient:
             logger.info(f"Network mode connected to {host}")
             return True
 
+        except AuthError as e:
+            logger.error(f"Authentication failed: {e}")
+            print(f"\n[ERROR] Authentication failed: {e}")
+            return False
         except Exception as e:
             logger.error(f"Network connection failed: {e}")
             return False

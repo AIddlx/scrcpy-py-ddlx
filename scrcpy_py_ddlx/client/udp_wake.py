@@ -110,13 +110,15 @@ def discover_devices(timeout: float = DISCOVERY_TIMEOUT,
             try:
                 data, addr = sock.recvfrom(1024)
                 if data.startswith(DISCOVER_RESPONSE_PREFIX):
-                    # Parse: "SCRCPY_HERE <device_name> <ip>"
+                    # Parse: "SCRCPY_HERE <device_name> <ip> [mode]"
+                    # mode is optional (stay-alive or single)
                     payload = data[len(DISCOVER_RESPONSE_PREFIX):].decode('utf-8', errors='ignore')
-                    parts = payload.strip().split(None, 1)
+                    parts = payload.strip().split()
 
                     if len(parts) >= 2:
                         device_name = parts[0]
-                        device_ip = parts[1]
+                        device_ip = parts[1]  # IP is always the second part
+                        # parts[2] would be mode (stay-alive/single) - ignored
                     elif len(parts) == 1:
                         device_name = parts[0]
                         device_ip = addr[0]

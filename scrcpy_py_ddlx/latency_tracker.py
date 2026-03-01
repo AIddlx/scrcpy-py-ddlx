@@ -288,3 +288,17 @@ def get_tracker() -> LatencyTracker:
     if _tracker is None:
         _tracker = LatencyTracker(enabled=True)
     return _tracker
+
+
+def disable_tracker() -> None:
+    """Disable the global latency tracker to save CPU."""
+    global _tracker
+    _tracker = LatencyTracker(enabled=False)
+
+
+def is_enabled() -> bool:
+    """Check if the latency tracker is enabled."""
+    global _tracker
+    if _tracker is None:
+        return True  # Not yet created, will be enabled by default
+    return _tracker.enabled

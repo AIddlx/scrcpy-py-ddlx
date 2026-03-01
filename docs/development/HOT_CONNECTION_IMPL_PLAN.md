@@ -400,6 +400,24 @@ python tests_gui/test_network_direct.py \
 - 传统 ADB 隧道模式不受影响
 - 客户端可以选择唤醒或直接连接（如果服务器已在推流）
 
+### 6.4 服务端进程持久化 (重要)
+
+**问题**：使用 `nohup` 启动服务端后，USB 断开时服务端仍会被杀死。
+
+**原因**：`nohup` 只忽略 SIGHUP 信号，但服务端仍是 ADB shell 进程的子进程。当 ADB 断开时，整个进程组被杀死。
+
+**解决方案**：使用 `setsid` 创建新会话，脱离 ADB shell 进程组：
+
+```bash
+# 修复前（USB 断开后服务端会被杀死）
+nohup sh -c 'app_process ...' > log 2>&1 &
+
+# 修复后（USB 断开后服务端继续运行）
+nohup setsid sh -c 'app_process ...' > log 2>&1 &
+```
+
+详见: [Stay-Alive USB 断开修复](known_issues/stay_alive_usb_disconnect.md)
+
 ---
 
 ## 7. 相关文档

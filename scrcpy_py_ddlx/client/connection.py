@@ -225,11 +225,24 @@ class ConnectionManager:
         # Connect TCP control
         conn.control_socket = ConnectionManager.connect_tcp_control(host, control_port)
 
-        # Perform authentication BEFORE dummy byte (if auth_key provided)
-        if auth_key is not None:
-            logger.info("Performing authentication...")
-            ConnectionManager.perform_auth(conn.control_socket, auth_key)
-            logger.info("Authentication successful")
+        # Check if server requires authentication
+        # Peek at the first byte to determine if it's a challenge (0xF0) or dummy byte (0x00)
+        first_byte = conn.control_socket.recv(1, socket.MSG_PEEK)
+        if not first_byte:
+            raise ConnectionError("Connection closed by server")
+
+        if first_byte[0] == 0xF0:  # TYPE_CHALLENGE
+            # Server requires authentication
+            if auth_key is not None:
+                logger.info("Server requires authentication, performing auth...")
+                ConnectionManager.perform_auth(conn.control_socket, auth_key)
+                logger.info("Authentication successful")
+            else:
+                # No auth key but server requires auth
+                raise AuthError("Server requires authentication but no auth key provided (use --auth or connect to server started with --no-auth)")
+        elif auth_key is not None:
+            # We have auth key but server doesn't require auth
+            logger.info("Server does not require authentication, skipping auth")
 
         # Wait for dummy byte
         if send_dummy_byte:

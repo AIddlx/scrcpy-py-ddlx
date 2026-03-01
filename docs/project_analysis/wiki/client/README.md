@@ -58,6 +58,16 @@ scrcpy_py_ddlx/
 
 ## 模块清单
 
+### 合并模块文档 (推荐)
+
+| 文档 | 包含文件数 | 职责 |
+|------|-----------|------|
+| [Decoder.md](Decoder.md) | 6 | 视频/音频解码器 |
+| [Demuxer.md](Demuxer.md) | 8 | 视频流解复用 |
+| [protocol.md](protocol.md) | 1 | 协议常量和枚举 |
+| [stream.md](stream.md) | 1 | TCP 流解析器 |
+| [GuiOverview.md](GuiOverview.md) | 6 | Qt 图形界面 |
+
 ### client/ - 客户端连接层
 
 | 文件 | 职责 | 状态 |
@@ -95,6 +105,12 @@ scrcpy_py_ddlx/
 | [control.md](control.md) | 触摸/按键控制命令 | ✅ |
 | [delay_buffer.md](delay_buffer.md) | 单帧缓冲区 | ✅ |
 | [device_msg.md](device_msg.md) | 设备消息接收器 | ✅ |
+| [auth.md](auth.md) | HMAC-SHA256 认证 | ✅ |
+| [heartbeat.md](heartbeat.md) | TCP 心跳机制 | ✅ |
+| [fec_decoder.md](fec_decoder.md) | FEC 解码器 | ✅ |
+| [file_channel.md](file_channel.md) | 文件传输通道 | ✅ |
+| [mcp_server.md](mcp_server.md) | MCP 服务器 | ✅ |
+| [preview_process.md](preview_process.md) | 预览进程 | ✅ |
 
 ---
 

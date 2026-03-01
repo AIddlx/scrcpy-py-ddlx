@@ -267,9 +267,9 @@ cdef void yuv_to_rgb_nogil(...) nogil:
 ## 相关文档
 
 - [项目分析报告](PROJECT_ANALYSIS.md)
-- [已知问题](development/known_issues/README.md)
-- [GIL 竞争问题](GIL_COMPETITION_ISSUE.md)
-- [多进程最佳实践](development/MULTIPROCESSING_BEST_PRACTICES.md)
+- [已知问题](../development/known_issues/README.md)
+- [GIL 竞争问题](../GIL_COMPETITION_ISSUE.md)
+- [多进程最佳实践](../development/MULTIPROCESSING_BEST_PRACTICES.md)
 
 ---
 

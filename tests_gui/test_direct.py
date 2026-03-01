@@ -1,10 +1,15 @@
 """
 直接引用源码的测试脚本 - 无需安装包
-支持播放音视频的同时录制音频
+纯 USB 模式，不支持无线连接
 
 运行方式:
-    cd C:\Project\IDEA\scrcpy-py-ddlx
+    cd C:\Project\IDEA\2\new\scrcpy-py-ddlx
     python -X utf8 tests_gui/test_direct.py
+
+要求:
+    - USB 线连接手机
+    - 手机开启 USB 调试
+    - 已授权此电脑调试
 """
 
 import sys
@@ -12,11 +17,8 @@ import logging
 import time
 import threading
 import subprocess
-import re
-import socket
 from pathlib import Path
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent
@@ -25,8 +27,10 @@ sys.path.insert(0, str(project_root))
 # 配置日志
 import logging.handlers
 
-# 创建日志文件名（带时间戳）
-log_filename = f"scrcpy_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+# 创建日志目录（用户缓存目录，与 MCP 服务器一致）
+log_dir = Path.home() / ".cache" / "scrcpy-py-ddlx" / "logs" / "test_gui_logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+log_filename = str(log_dir / f"scrcpy_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
 # 创建格式化器
 detailed_formatter = logging.Formatter(
@@ -87,8 +91,13 @@ def get_recording_filename():
     return f"recording_{timestamp}.{AUDIO_FORMAT}"
 
 
-def list_devices():
-    """获取已连接的设备列表"""
+def list_usb_devices():
+    """
+    获取已连接的 USB 设备列表
+
+    只返回 USB 设备（序列号不含冒号），
+    不包含网络设备（如 192.168.x.x:5555）
+    """
     try:
         result = subprocess.run(
             ["adb", "devices"],
@@ -97,213 +106,62 @@ def list_devices():
             timeout=5
         )
         lines = result.stdout.strip().split('\n')
-        device_list = []
+        usb_devices = []
         for line in lines:
             line = line.strip()
             if line and not line.startswith('List of devices'):
                 parts = line.split()
-                if parts:
-                    device_list.append(parts[0])
-        return device_list
+                if len(parts) >= 2 and parts[1] == 'device':
+                    # USB 设备序列号不含冒号，网络设备含冒号（如 ip:5555）
+                    if ':' not in parts[0]:
+                        usb_devices.append(parts[0])
+        return usb_devices
     except Exception as e:
         logger.error(f"获取设备列表失败: {e}")
         return []
 
 
-def check_adb_port(ip):
-    """检查指定 IP 的 5555 端口是否开放"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
-        result = sock.connect_ex((ip, 5555))
-        sock.close()
-        return ip if result == 0 else None
-    except Exception:
-        return None
+# ============================================================================
+# 以下为 5555 无线模式相关代码，已注释禁用
+# ============================================================================
 
+# import re
+# import socket
+# from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def auto_discover_device():
-    """自动发现并连接设备"""
-    print("[WARN] 未检测到已连接设备，尝试自动发现...")
+# def check_adb_port(ip):
+#     """检查指定 IP 的 5555 端口是否开放"""
+#     try:
+#         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#         sock.settimeout(0.5)
+#         result = sock.connect_ex((ip, 5555))
+#         sock.close()
+#         return ip if result == 0 else None
+#     except Exception:
+#         return None
 
-    try:
-        connected = False
+# def auto_discover_device():
+#     """自动发现并连接设备（已禁用）"""
+#     # 此函数包含 5555 端口扫描和无线连接逻辑
+#     # 纯 USB 模式下不需要
+#     pass
 
-        # 策略1: 检查是否有 USB 设备，自动启用无线
-        result = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=5)
-        usb_device = None
+# def enable_tcpip_5555(device_serial):
+#     """启用 TCP/IP 5555 模式（已禁用）"""
+#     # subprocess.run(["adb", "-s", device_serial, "tcpip", "5555"], ...)
+#     pass
 
-        for line in result.stdout.strip().split('\n'):
-            line = line.strip()
-            if not line or line.startswith('List of devices'):
-                continue
-            parts = line.split()
-            # USB 设备：至少 2 列，第一列不含冒号
-            if len(parts) >= 2 and 'device' in line and ':' not in parts[0]:
-                usb_device = parts[0]
-                break
+# def scan_network_for_adb():
+#     """扫描局域网寻找 ADB 设备（已禁用）"""
+#     # 此函数扫描 5555 端口
+#     pass
 
-        if usb_device:
-            print(f"[INFO] 检测到 USB 设备: {usb_device}")
-            print("[INFO] 正在自动启用无线模式...")
+# def connect_wireless(device_ip):
+#     """无线连接设备（已禁用）"""
+#     # subprocess.run(["adb", "connect", f"{device_ip}:5555"], ...)
+#     pass
 
-            # 步骤1: 启用 TCP/IP
-            tcpip_result = subprocess.run(
-                ["adb", "-s", usb_device, "tcpip", "5555"],
-                capture_output=True, text=True, timeout=15
-            )
-
-            if tcpip_result.returncode != 0:
-                print(f"[ERROR] 启用 TCP/IP 失败: {tcpip_result.stderr}")
-                return None
-
-            print("[INFO] TCP/IP 模式已启用")
-
-            # 步骤2: 从设备获取 IP 地址
-            interfaces = ["wlan0", "wifi0", "wlan1", "eth0"]
-            device_ip = None
-
-            for interface in interfaces:
-                print(f"[INFO] 正在从 {interface} 获取 IP 地址...")
-                ip_result = subprocess.run(
-                    ["adb", "-s", usb_device, "shell", "ip", "addr", "show", interface],
-                    capture_output=True, text=True, timeout=5
-                )
-
-                # 提取 IP 地址
-                for match in re.finditer(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', ip_result.stdout):
-                    ip = match.group(1)
-                    # 过滤掉特殊地址
-                    if not ip.startswith(('127.', '169.254.', '0.0.0.')):
-                        device_ip = ip
-                        print(f"[INFO] 找到设备 IP: {device_ip} ({interface})")
-                        break
-                if device_ip:
-                    break
-
-            if not device_ip:
-                print("[ERROR] 无法获取设备 IP 地址")
-                print("[ERROR] 请确保手机连接了 WiFi")
-                return None
-
-            # 步骤3: 建立无线连接
-            wireless_addr = f"{device_ip}:5555"
-            print(f"[INFO] 正在连接到 {wireless_addr}...")
-            connect_result = subprocess.run(
-                ["adb", "connect", wireless_addr],
-                capture_output=True, text=True, timeout=10
-            )
-
-            if "connected" in connect_result.stdout.lower() or "already connected" in connect_result.stdout.lower():
-                print(f"[SUCCESS] 无线连接成功: {wireless_addr}")
-                print("[INFO] USB 线已可安全拔除，设备保持无线连接")
-                connected = True
-                return wireless_addr
-            else:
-                print(f"[ERROR] 无线连接失败: {connect_result.stderr}")
-                return None
-
-        # 策略2: 如果没有 USB，扫描局域网寻找 ADB 设备
-        if not connected:
-            print("[INFO] 未检测到 USB 设备，正在扫描局域网...")
-
-            # 获取本机 IP 和网段
-            local_ip = None
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(2)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                local_ip = "192.168.1.1"
-
-            print(f"[INFO] 本机 IP: {local_ip}")
-
-            # 提取网段（如 192.168.1.0/24）
-            ip_parts = local_ip.split('.')
-            network_prefix = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}"
-
-            print(f"[INFO] 正在扫描网段 {network_prefix}.0/24 中开启 ADB 无线调试的设备...")
-
-            # 触发网络发现（Ping 网关和常见地址，解决 Windows 防火墙/ARP 延迟问题）
-            print("[INFO] 触发网络发现（ping 网关）...")
-            try:
-                gateway_ip = f"{network_prefix}.1"
-                subprocess.run(
-                    ["ping", "-n", "1", "-w", "500", gateway_ip],
-                    capture_output=True,
-                    timeout=2
-                )
-            except Exception:
-                pass
-
-            print("[INFO] 正在扫描设备（这可能需要 10-30 秒）...")
-
-            # 扫描网段内常见 IP 范围（1-254）
-            found_devices = []
-
-            with ThreadPoolExecutor(max_workers=50) as executor:
-                futures = {}
-                for i in range(1, 255):
-                    ip = f"{network_prefix}.{i}"
-                    futures[executor.submit(check_adb_port, ip)] = ip
-
-                for future in as_completed(futures):
-                    ip = futures[future]
-                    try:
-                        result = future.result()
-                        if result:
-                            found_devices.append(result)
-                            print(f"[SUCCESS] 发现设备: {result}:5555")
-                    except Exception:
-                        pass
-
-            if found_devices:
-                print(f"[INFO] 共发现 {len(found_devices)} 个设备，正在尝试连接...")
-
-                # 尝试连接第一个找到的设备
-                for device_ip in found_devices:
-                    wireless_addr = f"{device_ip}:5555"
-                    print(f"[INFO] 正在连接 {wireless_addr}...")
-
-                    connect_result = subprocess.run(
-                        ["adb", "connect", wireless_addr],
-                        capture_output=True, text=True, timeout=10
-                    )
-
-                    if "connected" in connect_result.stdout.lower() or "already connected" in connect_result.stdout.lower():
-                        print(f"[SUCCESS] 无线连接成功: {wireless_addr}")
-                        return wireless_addr
-                    else:
-                        print(f"[INFO] 连接 {wireless_addr} 失败")
-
-            # 未找到设备
-            print("[ERROR]")
-            print("[ERROR] 未在局域网内发现开启 ADB 无线调试的设备")
-            print("[ERROR]")
-            print("[ERROR] 请确保：")
-            print("[ERROR]   • 手机和电脑在同一网络")
-            print("[ERROR]   • 手机已启用 USB 调试")
-            print("[ERROR]   • 手机已通过 USB 线启用过无线调试模式（adb tcpip 5555）")
-            print("[ERROR]")
-            print("[ERROR] 首次使用建议：")
-            print("[ERROR]   1. 用 USB 线连接手机")
-            print("[ERROR]   2. 运行此脚本，它会自动启用无线模式")
-            print("[ERROR]   3. 之后拔掉 USB 线，设备将保持无线连接")
-            print("[ERROR]")
-            return None
-
-    except subprocess.TimeoutExpired:
-        print("[ERROR] 操作超时，请检查：")
-        print("[ERROR]   • USB 线是否正确连接")
-        print("[ERROR]   • 手机是否已解锁")
-        print("[ERROR]   • USB 调试是否已开启")
-        return None
-    except Exception as e:
-        print(f"[ERROR] 自动发现失败: {e}")
-        logger.error(f"自动发现异常: {e}", exc_info=True)
-        return None
+# ============================================================================
 
 
 def _timed_recording_thread(duration: float, client):
@@ -327,12 +185,14 @@ def _timed_recording_thread(duration: float, client):
 
 
 def main():
-    """主测试入口"""
+    """主测试入口 - 纯 USB 模式"""
     global _global_client, _global_window, _recording_stop_event
 
     print("=" * 60)
-    print("scrcpy-py-ddlsx 音视频录制测试")
+    print("scrcpy-py-ddlsx 纯 USB 模式测试")
     print("=" * 60)
+    print("[INFO] 本脚本仅支持 USB 连接，不支持无线模式")
+    print()
 
     # 检查依赖
     try:
@@ -378,35 +238,42 @@ def main():
     else:
         print("[INFO] 音频录制: 禁用")
 
-    # 设备检测和自动发现
-    print("\n正在检测设备...")
-    device_list = list_devices()
+    # USB 设备检测
+    print("\n正在检测 USB 设备...")
+    usb_devices = list_usb_devices()
 
-    if device_list:
-        print(f"[INFO] 检测到 {len(device_list)} 个已连接设备:")
-        for device in device_list:
-            print(f"  - {device}")
-        device_id = device_list[0]
-    else:
-        # 尝试自动发现
-        device_id = auto_discover_device()
-        if not device_id:
-            print("[ERROR] 无法发现设备，程序退出")
-            return
+    if not usb_devices:
+        print("[ERROR] 未检测到 USB 设备")
+        print("[ERROR]")
+        print("[ERROR] 请确保：")
+        print("[ERROR]   1. USB 线已正确连接")
+        print("[ERROR]   2. 手机已解锁")
+        print("[ERROR]   3. USB 调试已开启")
+        print("[ERROR]   4. 已授权此电脑进行调试")
+        print("[ERROR]")
+        print("[ERROR] 提示：本脚本仅支持 USB 连接")
+        print("[ERROR]       如需无线连接，请使用 test_network_direct.py")
+        print("[ERROR]")
+        return
 
+    print(f"[INFO] 检测到 {len(usb_devices)} 个 USB 设备:")
+    for device in usb_devices:
+        print(f"  - {device}")
+
+    device_id = usb_devices[0]
     print(f"\n[INFO] 使用设备: {device_id}")
 
     # 创建客户端配置，指定设备序列号
     config = ClientConfig(
-        device_serial=device_id,  # 指定设备
+        device_serial=device_id,  # USB 设备序列号
         host="localhost",
         port=27183,
         show_window=True,  # 显示视频窗口
         audio=True,  # 启用音频
         audio_dup=False,  # 设为 True 可同时播放到手机和电脑
         clipboard_autosync=True,  # 启用剪贴板自动同步（PC ↔ 设备）
-        bitrate=2500000,  # 8 Mbps - 标准码率，保证画质
-        max_fps=30,  # 60fps - 流畅帧率
+        bitrate=2500000,  # 2.5 Mbps
+        max_fps=30,  # 30fps
     )
 
     # 创建客户端

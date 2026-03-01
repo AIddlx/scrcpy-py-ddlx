@@ -196,5 +196,5 @@
 ## 相关文档
 
 - [优化路线图](OPTIMIZATION_ROADMAP.md)
-- [已知问题](development/known_issues/README.md)
-- [GIL 竞争问题](GIL_COMPETITION_ISSUE.md)
+- [已知问题](../development/known_issues/README.md)
+- [GIL 竞争问题](../GIL_COMPETITION_ISSUE.md)

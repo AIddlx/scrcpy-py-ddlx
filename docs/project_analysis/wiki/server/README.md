@@ -46,6 +46,16 @@ com/genymobile/scrcpy/
 
 ## 模块清单
 
+### 合并模块文档 (推荐)
+
+| 文档 | 包含文件数 | 职责 |
+|------|-----------|------|
+| [ServerCore.md](ServerCore.md) | 7 | 服务入口、配置、工具类 |
+| [VideoPipeline.md](VideoPipeline.md) | 14 | 视频捕获和编码 |
+| [AudioPipeline.md](AudioPipeline.md) | 10 | 音频捕获和编码 |
+| [ControlProtocol.md](ControlProtocol.md) | 8 | 控制消息协议 |
+| [SystemWrappers.md](SystemWrappers.md) | 12 | Android 系统 API 包装 |
+
 ### device/ - 设备端核心
 
 | 文件 | 职责 | 状态 |
@@ -70,12 +80,27 @@ com/genymobile/scrcpy/
 | 文件 | 职责 | 状态 |
 |------|------|------|
 | [UdpMediaSender.md](UdpMediaSender.md) | UDP媒体数据发送 | ✅ |
+| [UdpDiscoveryReceiver.md](UdpDiscoveryReceiver.md) | UDP 发现和唤醒 | ✅ |
+| [SimpleXorFecEncoder.md](SimpleXorFecEncoder.md) | FEC 编码器 | ✅ |
+
+### 认证模块
+
+| 文件 | 职责 | 状态 |
+|------|------|------|
+| [AuthHandler.md](AuthHandler.md) | HMAC-SHA256 认证 | ✅ |
+
+### 文件传输
+
+| 文件 | 职责 | 状态 |
+|------|------|------|
+| [FileServer.md](FileServer.md) | 文件服务器 | ✅ |
 
 ### 核心入口
 
 | 文件 | 职责 | 状态 |
 |------|------|------|
 | [Server.md](Server.md) | 服务入口和会话管理 | ✅ |
+| [Options.md](Options.md) | 命令行参数 | ✅ |
 
 ---
 
@@ -159,16 +184,26 @@ Server
 
 ---
 
-## 安全改进计划
+## 安全特性
 
-当前网络模式为**明文传输**，计划改进：
+### v1.4 已实现
+
+| 功能 | 实现方式 | 状态 |
+|------|---------|------|
+| **HMAC-SHA256 认证** | Challenge-Response 协议 | ✅ 已实现 |
+| 密钥分发 | ADB 推送，用后删除 | ✅ |
+| 本地密钥存储 | ~/.config/scrcpy-py-ddlx/auth_keys/ | ✅ |
+
+### 未来计划
 
 | 版本 | 功能 | 状态 |
 |------|------|------|
-| v2.0 | 认证机制 (Token/Challenge) | 计划中 |
-| v3.0 | 加密传输 | 计划中 |
+| v2.0 | 传输加密 (TLS/Noise Protocol) | 计划中 |
+| v3.0 | 端到端加密 | 计划中 |
 
-**当前建议**：使用 ADB + USB 模式，数据不经过网络。
+**安全建议**：
+- 网络模式已支持认证，可在可信网络使用
+- 高安全场景建议使用 ADB + USB 模式
 
 ---
 
