@@ -353,8 +353,8 @@ private void takeScreenshot(int quality) {
 
 | 问题 | 风险等级 | 状态 | 建议
 |------|---------|------|------
-| 资源泄漏 | 🔴 高 | 待修复 | 实现显式释放机制
-| Image 未关闭 | 🟡 中 | 待修复 | 截图后关闭 Image
+| 资源泄漏 | 🔴 高 | ✅ 已修复 | Controller.stop() 中释放
+| Image 未关闭 | 🟡 中 | ✅ 已修复 | captureScreenshot() 后关闭
 | 并发逻辑复杂 | 🟢 低 | 可选 | 简化条件判断
 | 延迟初始化 | 💡 优化 | 可选 | 按需创建
 

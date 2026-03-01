@@ -18,6 +18,7 @@
 | [横屏触摸修复](landscape_touch_fix.md) | MCP 预览窗口横屏模式触摸失效 | ✅ 已修复 |
 | [Windows 端口 3359](port_3359_windows.md) | Windows Hyper-V 保留端口导致服务器无法启动 | ✅ 已修复 |
 | [SurfaceControl 截图限制](surfacecontrol_screenshot_limitation.md) | --push 模式 (video=false) 截图失败 | ✅ 已修复 |
+| [Windows UTF-8 编码](windows_utf8_encoding.md) | CMD/PowerShell 中文文件名乱码 | ✅ 已修复 |
 | [音频录制指南](../AUDIO_RECORDING_GUIDE.md) | 音频录制功能实现与常见问题 | 📖 指南 |
 | [调试方法论](../DEBUG_METHODOLOGY.md) | 高效调试问题的通用方法 | 📖 指南 |
 
@@ -32,6 +33,7 @@
 | [录音时长问题](audio_recording_duration.md) | 录音时长可能少于设定时间 | 低 | 待改进 |
 | [带音频视频录制](video_recording_with_audio.md) | 带音频的视频录制无法正常播放 | 高 | ❌ 失败/已隐藏 |
 | [Android 11 音频弹窗](android11_audio_popup.md) | Android 11 录音时出现短暂弹窗 | 低 | ✅ 已知限制 |
+| [Android 11+ 音频锁屏限制](audio_lock_screen_limitation.md) | 锁屏时启动音频失败，60秒内解锁可恢复 | 低 | ✅ 已知限制（有缓解措施） |
 | [录音透传模式](audio_passthrough_recording.md) | 透传模式暂回退为转码 | 中 | ⏳ 待实现 |
 
 ---

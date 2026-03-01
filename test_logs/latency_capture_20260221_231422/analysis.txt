@@ -1,0 +1,26 @@
+Latency Capture Analysis
+============================================================
+
+Capture settings:
+  Start delay: 5.0s
+  Rounds: 2
+  Frames per round: 2
+
+Captured data:
+  Packets: 4
+  Frames: 4
+
+Timing:
+  First packet: 1771686848983824000
+  Last packet: 1771686849211555300
+  First frame: 1771686848987859200
+  Last frame: 1771686849216933600
+
+Durations:
+  Packet capture duration: 227.7ms
+  Frame capture duration: 229.1ms
+
+Packet-to-Frame Latency Analysis:
+----------------------------------------
+
+  No matched frames found for latency analysis

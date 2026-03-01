@@ -50,6 +50,10 @@ public final class AudioEncoder implements AsyncProcessor {
     private static final int SAMPLE_RATE = AudioConfig.SAMPLE_RATE;
     private static final int CHANNELS = AudioConfig.CHANNELS;
 
+    // Audio capture retry settings for Android 11+ (device must be unlocked)
+    private static final int AUDIO_RETRY_INTERVAL_MS = 3000;  // 3 seconds
+    private static final int AUDIO_MAX_RETRIES = 20;  // 20 * 3s = 60 seconds max
+
     private final AudioCapture capture;
     private final Streamer streamer;
     private final int bitRate;
@@ -75,6 +79,10 @@ public final class AudioEncoder implements AsyncProcessor {
     // Standby mode support (network mode)
     private final AtomicBoolean standby = new AtomicBoolean(false);
     private final Object standbyLock = new Object();
+
+    // Audio retry support - controlled by video frame sender
+    private volatile boolean audioEnabled = false;
+    private volatile boolean retryRequested = false;
 
     public AudioEncoder(AudioCapture capture, Streamer streamer, Options options) {
         this.capture = capture;
@@ -175,8 +183,6 @@ public final class AudioEncoder implements AsyncProcessor {
             } catch (ConfigurationException e) {
                 // Do not print stack trace, a user-friendly error-message has already been logged
                 fatalError = true;
-            } catch (AudioCaptureException e) {
-                // Do not print stack trace, a user-friendly error-message has already been logged
             } catch (IOException e) {
                 Ln.e("Audio encoding error", e);
                 fatalError = true;
@@ -237,117 +243,176 @@ public final class AudioEncoder implements AsyncProcessor {
     }
 
     @TargetApi(AndroidVersions.API_23_ANDROID_6_0)
-    private void encode() throws IOException, ConfigurationException, AudioCaptureException {
+    private void encode() throws IOException, ConfigurationException {
         if (Build.VERSION.SDK_INT < AndroidVersions.API_30_ANDROID_11) {
             Ln.w("Audio disabled: it is not supported before Android 11");
             streamer.writeDisableStream(false);
             return;
         }
 
-        MediaCodec mediaCodec = null;
-
-        boolean mediaCodecStarted = false;
-        try {
-            capture.checkCompatibility(); // throws an AudioCaptureException on error
-
-            Codec codec = streamer.getCodec();
-            mediaCodec = createMediaCodec(codec, encoderName);
-
-            // The default OPUS and FLAC encoders overwrite the input PTS with a value that matches the number of samples. This is not the behavior
-            // we want: it ignores any audio clock drift and hard silences (packets not produced on silence). To work around this behavior,
-            // regenerate PTS based on the current time and the packet duration.
-            String codecName = mediaCodec.getCanonicalName();
-            recreatePts = "c2.android.opus.encoder".equals(codecName) || "c2.android.flac.encoder".equals(codecName);
-
-            mediaCodecThread = new HandlerThread("media-codec");
-            mediaCodecThread.start();
-
-            MediaFormat format = createFormat(codec.getMimeType(), bitRate, codecOptions);
-            mediaCodec.setCallback(new EncoderCallback(), new Handler(mediaCodecThread.getLooper()));
-            mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-
-            capture.start();
-
-            final MediaCodec mediaCodecRef = mediaCodec;
-            inputThread = new Thread(() -> {
-                try {
-                    inputThread(mediaCodecRef, capture);
-                } catch (IOException | InterruptedException e) {
-                    Ln.e("Audio capture error", e);
-                } finally {
-                    end();
-                }
-            }, "audio-in");
-
-            outputThread = new Thread(() -> {
-                try {
-                    outputThread(mediaCodecRef);
-                } catch (InterruptedException e) {
-                    // this is expected on close
-                } catch (IOException e) {
-                    // Broken pipe is expected on close, because the socket is closed by the client
-                    if (!IO.isBrokenPipe(e)) {
-                        Ln.e("Audio encoding error", e);
-                    }
-                } finally {
-                    end();
-                }
-            }, "audio-out");
-
-            mediaCodec.start();
-            mediaCodecStarted = true;
-            inputThread.start();
-            outputThread.start();
-
-            waitEnded();
-        } catch (ConfigurationException e) {
-            // Notify the error to make scrcpy exit
-            streamer.writeDisableStream(true);
-            throw e;
-        } catch (Throwable e) {
-            // Notify the client that the audio could not be captured
-            streamer.writeDisableStream(false);
-            throw e;
-        } finally {
-            // Cleanup everything (either at the end or on error at any step of the initialization)
-            if (mediaCodecThread != null) {
-                Looper looper = mediaCodecThread.getLooper();
-                if (looper != null) {
-                    looper.quitSafely();
-                }
-            }
-            if (inputThread != null) {
-                inputThread.interrupt();
-            }
-            if (outputThread != null) {
-                outputThread.interrupt();
-            }
+        // Retry loop for Android 11+ foreground requirement
+        // If device is locked when scrcpy starts, audio capture will fail
+        // We retry periodically until it succeeds or max retries exhausted
+        int retryCount = 0;
+        while (!Thread.currentThread().isInterrupted()) {
+            MediaCodec mediaCodec = null;
+            boolean mediaCodecStarted = false;
 
             try {
-                if (mediaCodecThread != null) {
-                    mediaCodecThread.join();
-                }
-                if (inputThread != null) {
-                    inputThread.join();
-                }
-                if (outputThread != null) {
-                    outputThread.join();
-                }
-            } catch (InterruptedException e) {
-                // Should never happen
-                throw new AssertionError(e);
-            }
+                capture.checkCompatibility(); // throws an AudioCaptureException on error
 
-            if (mediaCodec != null) {
-                if (mediaCodecStarted) {
-                    mediaCodec.stop();
+                Codec codec = streamer.getCodec();
+                mediaCodec = createMediaCodec(codec, encoderName);
+
+                // The default OPUS and FLAC encoders overwrite the input PTS with a value that matches the number of samples. This is not the behavior
+                // we want: it ignores any audio clock drift and hard silences (packets not produced on silence). To work around this behavior,
+                // regenerate PTS based on the current time and the packet duration.
+                String codecName = mediaCodec.getCanonicalName();
+                recreatePts = "c2.android.opus.encoder".equals(codecName) || "c2.android.flac.encoder".equals(codecName);
+
+                mediaCodecThread = new HandlerThread("media-codec");
+                mediaCodecThread.start();
+
+                MediaFormat format = createFormat(codec.getMimeType(), bitRate, codecOptions);
+                mediaCodec.setCallback(new EncoderCallback(), new Handler(mediaCodecThread.getLooper()));
+                mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+
+                capture.start();
+
+                final MediaCodec mediaCodecRef = mediaCodec;
+                inputThread = new Thread(() -> {
+                    try {
+                        inputThread(mediaCodecRef, capture);
+                    } catch (IOException | InterruptedException e) {
+                        Ln.e("Audio capture error", e);
+                    } finally {
+                        end();
+                    }
+                }, "audio-in");
+
+                outputThread = new Thread(() -> {
+                    try {
+                        outputThread(mediaCodecRef);
+                    } catch (InterruptedException e) {
+                        // this is expected on close
+                    } catch (IOException e) {
+                        // Broken pipe is expected on close, because the socket is closed by the client
+                        if (!IO.isBrokenPipe(e)) {
+                            Ln.e("Audio encoding error", e);
+                        }
+                    } finally {
+                        end();
+                    }
+                }, "audio-out");
+
+                mediaCodec.start();
+                mediaCodecStarted = true;
+                inputThread.start();
+                outputThread.start();
+
+                // Success - log and exit retry loop
+                if (retryCount > 0) {
+                    Ln.i("Audio capture started successfully after " + retryCount + " retry(es)");
                 }
-                mediaCodec.release();
-            }
-            if (capture != null) {
-                capture.stop();
+
+                waitEnded();
+                return; // Normal exit
+
+            } catch (ConfigurationException e) {
+                // Configuration error - cannot retry
+                Ln.e("Audio configuration error, cannot retry");
+                streamer.writeDisableStream(true);
+                throw e;
+            } catch (AudioCaptureException e) {
+                // Audio capture failed - likely device is locked (Android 11+ requirement)
+                retryCount++;
+
+                // Cleanup before retry
+                cleanupAfterFailure(mediaCodec, mediaCodecStarted);
+
+                if (retryCount <= AUDIO_MAX_RETRIES) {
+                    Ln.w("Audio capture failed (attempt " + retryCount + "/" + AUDIO_MAX_RETRIES + "): " + e.getMessage());
+                    Ln.i("Retrying in " + (AUDIO_RETRY_INTERVAL_MS / 1000) + " seconds... (device may be locked)");
+
+                    try {
+                        Thread.sleep(AUDIO_RETRY_INTERVAL_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        Ln.i("Audio retry interrupted, disabling stream");
+                        streamer.writeDisableStream(false);
+                        return;
+                    }
+                } else {
+                    // Max retries exhausted
+                    Ln.e("Audio capture failed after " + AUDIO_MAX_RETRIES + " attempts, disabling audio stream");
+                    streamer.writeDisableStream(false);
+                    return;
+                }
+            } catch (Throwable e) {
+                // Other unexpected errors
+                Ln.e("Unexpected audio error", e);
+                cleanupAfterFailure(mediaCodec, mediaCodecStarted);
+
+                retryCount++;
+                if (retryCount <= AUDIO_MAX_RETRIES) {
+                    Ln.i("Retrying audio capture in " + (AUDIO_RETRY_INTERVAL_MS / 1000) + " seconds...");
+                    try {
+                        Thread.sleep(AUDIO_RETRY_INTERVAL_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        streamer.writeDisableStream(false);
+                        return;
+                    }
+                } else {
+                    streamer.writeDisableStream(false);
+                    return;
+                }
             }
         }
+    }
+
+    private void cleanupAfterFailure(MediaCodec mediaCodec, boolean mediaCodecStarted) {
+        if (mediaCodecThread != null) {
+            Looper looper = mediaCodecThread.getLooper();
+            if (looper != null) {
+                looper.quitSafely();
+            }
+        }
+        if (inputThread != null) {
+            inputThread.interrupt();
+        }
+        if (outputThread != null) {
+            outputThread.interrupt();
+        }
+
+        try {
+            if (mediaCodecThread != null) {
+                mediaCodecThread.join(100);
+            }
+            if (inputThread != null) {
+                inputThread.join(100);
+            }
+            if (outputThread != null) {
+                outputThread.join(100);
+            }
+        } catch (InterruptedException e) {
+            // ignore
+        }
+
+        if (mediaCodec != null) {
+            if (mediaCodecStarted) {
+                mediaCodec.stop();
+            }
+            mediaCodec.release();
+        }
+        if (capture != null) {
+            capture.stop();
+        }
+
+        // Reset for retry
+        mediaCodecThread = null;
+        inputThread = null;
+        outputThread = null;
     }
 
     private static MediaCodec createMediaCodec(Codec codec, String encoderName) throws IOException, ConfigurationException {

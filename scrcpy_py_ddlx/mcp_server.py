@@ -617,6 +617,7 @@ class ScrcpyMCPServer:
         config = ClientConfig(
             show_window=False,
             control=True,
+            video=self._default_config.video,  # Inherit video setting
             audio=audio,
             audio_dup=audio_dup,
             lazy_decode=self._default_config.lazy_decode,

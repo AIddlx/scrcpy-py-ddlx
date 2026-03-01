@@ -279,6 +279,16 @@ class VideoDecoder:
         # Frame size change callback (called when decoded frame resolution differs from expected)
         self._frame_size_changed_callback: Optional[callable] = None
 
+        # Content detection settings (for static frame detection)
+        self._content_detection_enabled: bool = True
+        self._content_detection_interval: int = 5
+        self._content_extreme_threshold: float = 0.15
+        self._content_shift_threshold: int = 30
+        self._content_variance_min: int = 50
+
+        # Decode error callback (for PLI triggering)
+        self._on_decode_error_callback: Optional[callable] = None
+
         # Initialize decoder
         self._initialize_decoder()
 
@@ -323,6 +333,50 @@ class VideoDecoder:
         """
         self._frame_size_changed_callback = callback
         logger.debug("Frame size change callback set")
+
+    def configure_content_detection(
+        self,
+        enabled: bool = True,
+        interval: int = 5,
+        extreme_threshold: float = 0.15,
+        shift_threshold: int = 30,
+        variance_min: int = 50
+    ) -> None:
+        """
+        Configure content detection settings for static frame detection.
+
+        Content detection is used to identify when the screen content is static
+        (not changing), which can help with power saving and latency optimization.
+
+        Args:
+            enabled: Enable/disable content detection (default: True)
+            interval: Check interval in frames (default: 5)
+            extreme_threshold: Threshold for extreme pixel changes (default: 0.15)
+            shift_threshold: Threshold for frame shift detection (default: 30)
+            variance_min: Minimum variance for content change detection (default: 50)
+        """
+        self._content_detection_enabled = enabled
+        self._content_detection_interval = interval
+        self._content_extreme_threshold = extreme_threshold
+        self._content_shift_threshold = shift_threshold
+        self._content_variance_min = variance_min
+        logger.debug(
+            f"Content detection configured: enabled={enabled}, interval={interval}"
+        )
+
+    def set_on_decode_error_callback(self, callback: Optional[callable]) -> None:
+        """
+        Set the callback for decode errors.
+
+        This is used to trigger PLI (Picture Loss Indication) when the decoder
+        detects errors, allowing the encoder to send a keyframe.
+
+        Args:
+            callback: Function that takes (error_type: str, details: str) arguments,
+                     or None to disable
+        """
+        self._on_decode_error_callback = callback
+        logger.debug("Decode error callback set")
 
     def _initialize_decoder(self) -> None:
         """
@@ -1015,7 +1069,27 @@ class VideoDecoder:
                         capture_time_str = dt.datetime.fromtimestamp(capture_time).strftime('%H:%M:%S.%f')[:-3]
                         logger.info(f"[DECODER] Frame #{self._frame_count}: packet_id={packet_id}, pts={pts}, UDP={udp_time_str}, CAPTURE={capture_time_str}")
 
-                    # If shm_writer is set, write directly to SHM (bypasses DelayBuffer and frame_sender_thread)
+                    # Push to DelayBuffer for screenshot support (always, even with SHM)
+                    # This ensures screenshot() can get the latest frame
+                    if self._output_nv12 and frame_data is not None:
+                        # For Direct SHM mode: frame_data is bytes, wrap in dict for screenshot conversion
+                        if isinstance(frame_data, bytes):
+                            screenshot_frame = {
+                                'nv12_bytes': frame_data,
+                                'width': frame_w,
+                                'height': frame_h
+                            }
+                            success, previous_skipped = self._frame_buffer.push(screenshot_frame, packet_id, pts, capture_time, udp_recv_time, send_time_ns, self._width, self._height)
+                        else:
+                            # Already dict format (Y/U/V planes or GPU dict)
+                            success, previous_skipped = self._frame_buffer.push(frame_data, packet_id, pts, capture_time, udp_recv_time, send_time_ns, self._width, self._height)
+                    elif bgr_frame is not None:
+                        success, previous_skipped = self._frame_buffer.push(bgr_frame, packet_id, pts, capture_time, udp_recv_time, send_time_ns, self._width, self._height)
+                        # CRITICAL: Reduced frame drop logging for performance
+                        if previous_skipped and self._frame_count % 100 == 0:
+                            logger.debug(f"Frame drops detected (count={self._frame_count})")
+
+                    # If shm_writer is set, also write directly to SHM for preview window
                     # This eliminates GIL contention between decoder and frame_sender
                     if self._shm_writer is not None:
                         if self._output_nv12 and frame_data is not None:
@@ -1024,26 +1098,6 @@ class VideoDecoder:
                         elif bgr_frame is not None:
                             # Write RGB format for CPU rendering
                             self._shm_writer.write_frame(bgr_frame, pts, capture_time, udp_recv_time)
-                    else:
-                        # Fallback: use DelayBuffer
-                        if self._output_nv12 and frame_data is not None:
-                            # NV12 format: frame_data is a dict with y, u, v planes
-                            success, previous_skipped = self._frame_buffer.push(frame_data, packet_id, pts, capture_time, udp_recv_time, send_time_ns, self._width, self._height)
-                            # Log frame skips (renderer not consuming fast enough)
-                            if previous_skipped:
-                                self._skip_count = getattr(self, '_skip_count', 0) + 1
-                                if self._skip_count % 10 == 1:  # Log every 10 skips
-                                    logger.warning(f"[FRAME_SKIP] NV12 frame #{packet_id} skipped (total skips={self._skip_count})")
-                        elif bgr_frame is not None:
-                            # RGB format (original behavior)
-                            success, previous_skipped = self._frame_buffer.push(bgr_frame, packet_id, pts, capture_time, udp_recv_time, send_time_ns, self._width, self._height)
-
-                            # CRITICAL: Reduced frame drop logging for performance
-                            # Only log drops periodically (every 100 drops) at DEBUG level
-                            if previous_skipped and self._frame_count % 100 == 0:
-                                logger.debug(
-                                    f"Frame drops detected (count={self._frame_count})"
-                                )
 
                     # Always trigger update (removed event reuse mechanism - was causing issues)
                     # Push to frame sink if provided (e.g., Screen for video window)

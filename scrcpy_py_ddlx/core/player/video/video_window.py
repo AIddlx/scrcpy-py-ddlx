@@ -11,8 +11,8 @@ import numpy as np
 
 try:
     from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
-    from PySide6.QtCore import QCoreApplication, QTimer, QMetaObject, Qt, Q_ARG, Slot
-    from PySide6.QtGui import QScreen
+    from PySide6.QtCore import QCoreApplication, QTimer, QMetaObject, Qt, Q_ARG, Slot, QUrl
+    from PySide6.QtGui import QScreen, QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent
 except ImportError:
     QApplication = None
     QMainWindow = None
@@ -22,6 +22,11 @@ except ImportError:
     QMetaObject = None
     Qt = None
     QScreen = None
+    QUrl = None
+    QDragEnterEvent = None
+    QDragMoveEvent = None
+    QDragLeaveEvent = None
+    QDropEvent = None
     Slot = lambda *args: lambda f: f  # Fallback: identity decorator
 
 from scrcpy_py_ddlx.core.player.video.video_widget import VideoWidget
@@ -517,6 +522,10 @@ class OpenGLVideoWindow(QMainWindow if QMainWindow else object):
             self._opengl_renderer = OpenGLVideoRenderer()
             # QOpenGLWindow is a QWindow, need to embed it in a QWidget
             self._video_widget = QWidget.createWindowContainer(self._opengl_renderer)
+            # Enable drag & drop on the container widget (it covers the whole window)
+            self._video_widget.setAcceptDrops(True)
+            # Install event filter to forward drag events to this window
+            self._video_widget.installEventFilter(self)
             logger.info("[OPENGL_WINDOW] Using QOpenGLWindow-based renderer (low CPU mode)")
         else:
             # Fallback to QOpenGLWidget if renderer not available
@@ -546,6 +555,11 @@ class OpenGLVideoWindow(QMainWindow if QMainWindow else object):
         # Counter to skip multiple resizeEvent during programmatic resize
         # Qt may trigger multiple resizeEvent during animation
         self._skip_resize_count: int = 0
+
+        # Enable drag & drop for file transfer
+        self.setAcceptDrops(True)
+        self._file_pusher = None  # Will be set by client
+        logger.debug("[OPENGL_WINDOW] Drag & drop enabled on QMainWindow")
 
     def set_device_info(self, name: str, width: int, height: int) -> None:
         """Set device information."""
@@ -979,6 +993,89 @@ class OpenGLVideoWindow(QMainWindow if QMainWindow else object):
         if self._user_scale is None or abs(new_scale - self._user_scale) > 0.01:
             self._user_scale = new_scale
             logger.debug(f"[WINDOW] User scale updated: {new_scale:.3f}")
+
+    def set_file_pusher(self, pusher):
+        """Set file pusher for drag & drop file transfer."""
+        self._file_pusher = pusher
+        logger.debug("[OPENGL_WINDOW] File pusher set")
+
+    def eventFilter(self, obj, event):
+        """Event filter to forward drag events from child widgets."""
+        from PySide6.QtCore import QEvent
+        # Forward drag events from video widget to this window
+        if obj == self._video_widget:
+            if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove,
+                               QEvent.Type.DragLeave, QEvent.Type.Drop):
+                # Forward the event to this window's handlers
+                if event.type() == QEvent.Type.DragEnter:
+                    self.dragEnterEvent(event)
+                elif event.type() == QEvent.Type.DragMove:
+                    self.dragMoveEvent(event)
+                elif event.type() == QEvent.Type.DragLeave:
+                    self.dragLeaveEvent(event)
+                elif event.type() == QEvent.Type.Drop:
+                    self.dropEvent(event)
+                return True  # Event handled
+        return super().eventFilter(obj, event)
+
+    def dragEnterEvent(self, event):
+        """Handle drag enter event - accept file drops."""
+        logger.debug("[DND] dragEnterEvent triggered")
+        if event.mimeData().hasUrls():
+            # Check if all URLs are local files
+            urls = event.mimeData().urls()
+            for url in urls:
+                if not url.isLocalFile():
+                    event.ignore()
+                    return
+            event.acceptProposedAction()
+            logger.debug(f"[DND] Accepted drag with {len(urls)} file(s)")
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Handle drag move event."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Handle drag leave event."""
+        event.accept()
+        logger.debug("[DND] dragLeaveEvent")
+
+    def dropEvent(self, event):
+        """Handle drop event - push/install files via ADB."""
+        logger.info("[DND] dropEvent triggered")
+        if not event.mimeData().hasUrls():
+            event.ignore()
+            return
+
+        urls = event.mimeData().urls()
+        event.acceptProposedAction()
+        logger.info(f"[DND] Dropped {len(urls)} file(s)")
+
+        for url in urls:
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+                logger.info(f"[DND] Processing file: {file_path}")
+                self._push_file(file_path)
+
+    def _push_file(self, file_path: str):
+        """Push or install a file via ADB."""
+        logger.info(f"[DND] _push_file called: {file_path}")
+        if self._file_pusher is None:
+            # Use global file pusher
+            from scrcpy_py_ddlx.core.file_pusher import get_file_pusher
+            pusher = get_file_pusher()
+            logger.debug("[DND] Using global file pusher")
+        else:
+            pusher = self._file_pusher
+            logger.debug("[DND] Using instance file pusher")
+
+        result = pusher.request(file_path)
+        logger.info(f"[DND] pusher.request() returned: {result}")
 
     def closeEvent(self, event) -> None:
         """

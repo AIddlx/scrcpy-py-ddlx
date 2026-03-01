@@ -281,6 +281,10 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         if (fileServer != null) {
             fileServer.stop();
         }
+        if (screenshotCapture != null) {
+            screenshotCapture.release();
+            screenshotCapture = null;
+        }
     }
 
     @Override

@@ -50,8 +50,11 @@ def _profile_report():
 
 try:
     from PySide6.QtOpenGL import QOpenGLWindow
-    from PySide6.QtCore import Qt, QTimer, Signal
-    from PySide6.QtGui import QSurfaceFormat, QKeyEvent, QMouseEvent, QWheelEvent
+    from PySide6.QtCore import Qt, QTimer, Signal, QUrl, QMimeData
+    from PySide6.QtGui import (
+        QSurfaceFormat, QKeyEvent, QMouseEvent, QWheelEvent,
+        QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent
+    )
 except ImportError:
     QOpenGLWindow = object
     Qt = None
@@ -61,6 +64,12 @@ except ImportError:
     QKeyEvent = None
     QMouseEvent = None
     QWheelEvent = None
+    QDragEnterEvent = None
+    QDragMoveEvent = None
+    QDragLeaveEvent = None
+    QDropEvent = None
+    QUrl = None
+    QMimeData = None
 
 try:
     from OpenGL.GL import (
@@ -223,6 +232,25 @@ def create_opengl_video_renderer_class():
                 logger.info("[OPENGL_WINDOW] Timer started (16ms interval)")
             else:
                 self._update_timer = None
+
+            # Note: Drag & drop is handled by the parent QMainWindow container
+            # (OpenGLVideoWindow), not by QOpenGLWindow itself
+            self._file_pusher = None  # Reference to file pusher (set by parent)
+
+        def set_file_pusher(self, pusher):
+            """Set file pusher for drag & drop file transfer."""
+            self._file_pusher = pusher
+
+        def _push_file(self, file_path: str):
+            """Push or install a file via ADB."""
+            if self._file_pusher is None:
+                # Use global file pusher
+                from scrcpy_py_ddlx.core.file_pusher import get_file_pusher
+                pusher = get_file_pusher()
+            else:
+                pusher = self._file_pusher
+
+            pusher.request(file_path)
 
         def initialize(self) -> None:
             """Initialize OpenGL resources. Called automatically by Qt."""

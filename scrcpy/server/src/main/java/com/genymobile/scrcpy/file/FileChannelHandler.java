@@ -77,7 +77,7 @@ public class FileChannelHandler {
                 entry.put("name", file.getName());
                 entry.put("type", file.isDirectory() ? "directory" : "file");
                 entry.put("size", file.length());
-                entry.put("mtime", file.lastModified());
+                entry.put("mtime", file.lastModified() / 1000);  // 转换为秒级时间戳
                 entries.put(entry);
             }
         }
@@ -242,7 +242,7 @@ public class FileChannelHandler {
         if (file.exists()) {
             result.put("type", file.isDirectory() ? "directory" : "file");
             result.put("size", file.length());
-            result.put("mtime", file.lastModified());
+            result.put("mtime", file.lastModified() / 1000);  // 转换为秒级时间戳
             result.put("canRead", file.canRead());
             result.put("canWrite", file.canWrite());
         }

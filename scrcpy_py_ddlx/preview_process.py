@@ -377,29 +377,13 @@ def preview_window_process(frame_queue: mp.Queue,
         ready_event: Event to signal when preview window is ready
         notifier_handle: Handle for event-driven notifications (socket or event name)
     """
-    # Configure logging for this process - write to separate file
-    from datetime import datetime
-    # Log directory is at project_root/logs (same level as scrcpy_py_ddlx package)
-    # __file__ = scrcpy_py_ddlx/preview_process.py
-    # parent = scrcpy_py_ddlx, parent.parent = project root
-    log_dir = Path(__file__).parent.parent / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    # Configure logging for this process - 使用统一的日志配置模块
+    from scrcpy_py_ddlx.core.logging_config import setup_logging, get_cache_dir
 
-    # Reset logging configuration for this process
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler(sys.stdout)  # Also print to console
-        ]
-    )
+    log_file = setup_logging(prefix="preview", cleanup=True)
     logger = logging.getLogger(__name__)
     logger.info(f"Preview process logging to: {log_file}")
+    logger.info(f"Log directory: {get_cache_dir() / 'logs'}")
 
     # Connect to shared memory if available
     shared_mem_reader = None
@@ -2058,7 +2042,53 @@ def preview_window_process(frame_queue: mp.Queue,
             self.setFocus()
 
         def closeEvent(self, event):
-            self._timer.stop()
+            # Stop timer first
+            if hasattr(self, '_timer') and self._timer:
+                self._timer.stop()
+
+            # Disable and cleanup socket notifier
+            if self._socket_notifier:
+                try:
+                    self._socket_notifier.setEnabled(False)
+                    self._socket_notifier.activated.disconnect()
+                except:
+                    pass
+                self._socket_notifier = None
+
+            # Disable and cleanup win32 event notifier
+            if self._win_event_notifier:
+                try:
+                    self._win_event_notifier.setEnabled(False)
+                    self._win_event_notifier.activated.disconnect()
+                except:
+                    pass
+                self._win_event_notifier = None
+
+            # Close local socket
+            if hasattr(self, '_local_socket') and self._local_socket:
+                try:
+                    self._local_socket.disconnectFromServer()
+                except:
+                    pass
+                self._local_socket = None
+
+            # Close notify socket
+            if self._notify_socket:
+                try:
+                    self._notify_socket.close()
+                except:
+                    pass
+                self._notify_socket = None
+
+            # Close win32 event handle
+            if hasattr(self, '_win_event') and self._win_event:
+                try:
+                    import win32api
+                    win32api.CloseHandle(self._win_event)
+                except:
+                    pass
+                self._win_event = None
+
             stop_event.set()
             event.accept()
 
@@ -2090,6 +2120,7 @@ def preview_window_process(frame_queue: mp.Queue,
     def check_stop():
         if stop_event.is_set():
             logger.info("Stop event detected, closing preview")
+            stop_check_timer.stop()  # Stop timer first to avoid re-entry
             window.close()
             app.quit()
 
@@ -2100,6 +2131,13 @@ def preview_window_process(frame_queue: mp.Queue,
     app.exec()
 
     logger.info("Preview window stopped")
+
+    # Stop the stop_check_timer first
+    try:
+        stop_check_timer.stop()
+        logger.debug("Stop check timer stopped")
+    except Exception as e:
+        logger.debug(f"Stop check timer cleanup: {e}")
 
     # Clean up shared memory reader
     if shared_mem_reader is not None:
@@ -2113,8 +2151,11 @@ def preview_window_process(frame_queue: mp.Queue,
     try:
         window.close()
         app.quit()
+        logger.debug("Qt cleanup completed")
     except Exception as e:
         logger.debug(f"Qt cleanup: {e}")
+
+    logger.info("Preview process exiting")
 
 
 class PreviewManager:

@@ -1,0 +1,41 @@
+Latency Capture Analysis
+============================================================
+
+Capture settings:
+  Start delay: 3.0s
+  Rounds: 1
+  Frames per round: 5
+
+Captured data:
+  Packets: 5
+  Frames: 5
+
+Timing:
+  First packet: 1771689113436843500
+  Last packet: 1771689113686843000
+  First frame: 1771689113472629700
+  Last frame: 1771689113736235200
+
+Durations:
+  Packet capture duration: 250.0ms
+  Frame capture duration: 263.6ms
+
+Packet-to-Frame Latency Analysis:
+----------------------------------------
+  Frame 47 (pts=158264016998): client=299.4ms, E2E=1771530849683.4ms
+
+  Matched by PTS: 1
+  Client latency (packet¡úrender): avg=299.4ms, min=299.4ms, max=299.4ms
+  E2E latency (device¡úrender): avg=1771530849683.4ms, min=1771530849683.4ms, max=1771530849683.4ms
+  (Note: E2E may be inaccurate if device/PC clocks not synced)
+
+Frame Interval Analysis:
+----------------------------------------
+  Frame 43¡ú44: 31.7ms
+  Frame 44¡ú45: 99.1ms
+  Frame 45¡ú46: 83.2ms
+  Frame 46¡ú47: 49.6ms
+
+  Average frame interval: 65.9ms (expected: ~16.7ms for 60fps)
+  Min interval: 31.7ms
+  Max interval: 99.1ms

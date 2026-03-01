@@ -425,6 +425,26 @@ def main():
         print(f"  设备分辨率: {client.state.device_size[0]}x{client.state.device_size[1]}")
         print(f"========================================\n")
 
+        # 初始化文件推送器（支持拖放文件传输）
+        from scrcpy_py_ddlx.core.file_pusher import init_file_pusher
+
+        def on_file_transfer_complete(success: bool, action: str, file_path: str):
+            """文件传输完成回调"""
+            filename = Path(file_path).name
+            if success:
+                if action == "install":
+                    print(f"[SUCCESS] APK 安装成功: {filename}")
+                else:
+                    print(f"[SUCCESS] 文件推送成功: {filename}")
+            else:
+                print(f"[ERROR] {'安装' if action == 'install' else '推送'}失败: {filename}")
+
+        file_pusher = init_file_pusher(
+            device_serial=device_id,
+            on_complete=on_file_transfer_complete
+        )
+        print("[INFO] 文件传输已启用 (拖放 APK 或文件到窗口)")
+
         # 启动音频录制 (使用原始 OPUS 包录制，零 CPU 开销)
         if ENABLE_AUDIO_RECORDING:
             recording_filename = get_recording_filename()
@@ -446,10 +466,12 @@ def main():
                     # 无限制录制（随窗口关闭停止）
                     print(f"[INFO] 录制中... (关闭窗口将停止录制)")
 
-        print("\n视频窗口已显示，音频正在录制，你可以:")
+        print("\n视频窗口已显示，你可以:")
         print("  - 使用鼠标点击/拖拽控制设备")
         print("  - 使用键盘输入文字")
         print("  - 使用滚轮滚动")
+        print("  - 拖放 APK 文件到窗口安装")
+        print("  - 拖放其他文件到窗口推送到设备")
         print("\n关闭窗口或按 Ctrl+C 断开连接...")
 
         # 使用Qt事件循环运行客户端

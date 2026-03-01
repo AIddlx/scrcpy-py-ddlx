@@ -289,6 +289,13 @@ class ControlMessage:
         """
         self._data["timestamp"] = timestamp
 
+    def set_open_file_channel(self):
+        """
+        Request to open file channel.
+        Empty message, only type byte.
+        """
+        pass
+
     def serialize(self) -> bytes:
         """
         Serialize control message to bytes.
@@ -445,7 +452,6 @@ class ControlMessage:
             ControlMessageType.ROTATE_DEVICE,
             ControlMessageType.OPEN_HARD_KEYBOARD_SETTINGS,
             ControlMessageType.RESET_VIDEO,
-            ControlMessageType.SCREENSHOT,
             ControlMessageType.GET_APP_LIST,  # Empty message: only type byte
             # Media stream control (network mode) - all empty messages
             ControlMessageType.REQUEST_VIDEO_FRAME,
@@ -457,10 +463,22 @@ class ControlMessage:
             # Empty messages: only type byte, no additional data
             buf.append(self.type)
 
+        elif self.type == ControlMessageType.SCREENSHOT:
+            # Screenshot message: type byte + quality byte
+            buf.append(self.type)
+            quality = self._data.get("quality", 75)
+            # Clamp quality to 1-100
+            quality = max(1, min(100, quality))
+            buf.append(quality)
+
         elif self.type == ControlMessageType.PING:
             buf.append(self.type)
             timestamp = self._data.get("timestamp", 0)
             buf.extend(struct.pack(">Q", timestamp))
+
+        elif self.type == ControlMessageType.OPEN_FILE_CHANNEL:
+            # Empty message, only type byte
+            buf.append(self.type)
 
         else:
             logger.warning(f"Unknown message type: {self.type}")

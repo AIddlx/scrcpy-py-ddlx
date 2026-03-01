@@ -364,6 +364,8 @@ class ADBManager:
                 cmd,
                 capture_output=capture_output,
                 text=capture_output,
+                encoding='utf-8' if capture_output else None,
+                errors='replace' if capture_output else None,
                 timeout=timeout,
                 check=False,
             )

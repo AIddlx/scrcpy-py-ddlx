@@ -192,17 +192,149 @@ public final class SurfaceControl {
     /**
      * Take a screenshot of the display.
      *
+     * Handles different Android API levels:
+     * - Android 14+ (API 34+): captureDisplay() with DisplayCaptureArgs
+     * - Android 12-13 (API 31-33): captureDisplay() with DisplayCaptureArgs
+     * - Android 11 (API 30): screenshot(Rect, int, int, int)
+     * - Android 10 and below: screenshot(int, int)
+     *
      * @param width  The desired width of the screenshot
      * @param height The desired height of the screenshot
      * @return A Bitmap of the screenshot, or null on failure
      */
     public static android.graphics.Bitmap screenshot(int width, int height) {
+        // Try methods from newest to oldest API
+        android.graphics.Bitmap bitmap = null;
+
+        // Android 14+ (API 34+): Try captureDisplay with ScreenshotHardwareBuffer
+        if (Build.VERSION.SDK_INT >= 34 && bitmap == null) {
+            bitmap = screenshotApi34(width, height);
+            if (bitmap != null) {
+                Ln.d("Screenshot using API 34+ captureDisplay");
+                return bitmap;
+            }
+        }
+
+        // Android 12+ (API 31+): Try captureDisplay with DisplayCaptureArgs
+        if (Build.VERSION.SDK_INT >= 31 && bitmap == null) {
+            bitmap = screenshotApi31(width, height);
+            if (bitmap != null) {
+                Ln.d("Screenshot using API 31+ captureDisplay");
+                return bitmap;
+            }
+        }
+
+        // Android 11 (API 30): screenshot(Rect, int, int, int)
+        if (Build.VERSION.SDK_INT >= 30 && bitmap == null) {
+            bitmap = screenshotApi30(width, height);
+            if (bitmap != null) {
+                Ln.d("Screenshot using API 30 screenshot(Rect, int, int, int)");
+                return bitmap;
+            }
+        }
+
+        // Android 10 and below: legacy screenshot(int, int)
+        if (bitmap == null) {
+            bitmap = screenshotLegacy(width, height);
+            if (bitmap != null) {
+                Ln.d("Screenshot using legacy screenshot(int, int)");
+                return bitmap;
+            }
+        }
+
+        Ln.e("Screenshot failed on all API methods");
+        return null;
+    }
+
+    /**
+     * Android 14+ (API 34+): Use captureDisplay() with IWindowManager
+     */
+    private static android.graphics.Bitmap screenshotApi34(int width, int height) {
         try {
-            // Use reflection to call SurfaceControl.screenshot(width, height)
+            // Android 14 uses IWindowManager.captureDisplay()
+            // This requires system permissions, likely won't work for us
+            // Try the API 31 method first as fallback
+            return screenshotApi31(width, height);
+        } catch (Exception e) {
+            Ln.d("API 34 screenshot failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Android 12+ (API 31+): Use captureDisplay() with DisplayCaptureArgs
+     */
+    private static android.graphics.Bitmap screenshotApi31(int width, int height) {
+        try {
+            IBinder displayToken = getBuiltInDisplay();
+            if (displayToken == null) {
+                Ln.d("Could not get display token for API 31 screenshot");
+                return null;
+            }
+
+            android.graphics.Rect sourceCrop = new android.graphics.Rect(0, 0, width, height);
+
+            // Try DisplayCaptureArgs.Builder approach
+            Class<?> displayCaptureArgsClass = Class.forName("android.view.SurfaceControl$DisplayCaptureArgs");
+            Class<?> builderClass = Class.forName("android.view.SurfaceControl$DisplayCaptureArgs$Builder");
+
+            // Create builder: new DisplayCaptureArgs.Builder(displayToken)
+            Object builder = builderClass.getConstructor(IBinder.class).newInstance(displayToken);
+
+            // builder.setSourceCrop(sourceCrop)
+            builderClass.getMethod("setSourceCrop", android.graphics.Rect.class).invoke(builder, sourceCrop);
+
+            // builder.setSize(width, height)
+            builderClass.getMethod("setSize", int.class, int.class).invoke(builder, width, height);
+
+            // builder.build()
+            Object captureArgs = builderClass.getMethod("build").invoke(builder);
+
+            // SurfaceControl.captureDisplay(captureArgs)
+            Method captureMethod = CLASS.getMethod("captureDisplay", displayCaptureArgsClass);
+            Object hardwareBuffer = captureMethod.invoke(null, captureArgs);
+
+            if (hardwareBuffer == null) {
+                return null;
+            }
+
+            // ScreenshotHardwareBuffer.asBitmap()
+            Class<?> shbClass = Class.forName("android.view.SurfaceControl$ScreenshotHardwareBuffer");
+            Method asBitmapMethod = shbClass.getMethod("asBitmap");
+            return (android.graphics.Bitmap) asBitmapMethod.invoke(hardwareBuffer);
+
+        } catch (Exception e) {
+            Ln.d("API 31 screenshot failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Android 11 (API 30): Use screenshot(Rect, int, int, int)
+     */
+    private static android.graphics.Bitmap screenshotApi30(int width, int height) {
+        try {
+            android.graphics.Rect sourceCrop = new android.graphics.Rect(0, 0, width, height);
+            int rotation = android.view.Surface.ROTATION_0;
+
+            Method method = CLASS.getMethod("screenshot",
+                android.graphics.Rect.class, int.class, int.class, int.class);
+            return (android.graphics.Bitmap) method.invoke(null, sourceCrop, width, height, rotation);
+        } catch (Exception e) {
+            Ln.d("API 30 screenshot failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Android 10 and below: Use legacy screenshot(int, int)
+     */
+    private static android.graphics.Bitmap screenshotLegacy(int width, int height) {
+        try {
             Method method = CLASS.getMethod("screenshot", int.class, int.class);
             return (android.graphics.Bitmap) method.invoke(null, width, height);
         } catch (Exception e) {
-            Ln.e("Could not take screenshot", e);
+            Ln.d("Legacy screenshot failed: " + e.getMessage());
             return null;
         }
     }

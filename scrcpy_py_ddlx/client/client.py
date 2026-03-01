@@ -1504,25 +1504,19 @@ class ScrcpyClient:
             else "clipboard_autosync=false"
         )
 
-        # Select video codec and encoder using capability cache
+        # Video parameter - CRITICAL: must tell server if video is disabled
+        video_params = f"video={str(self.config.video).lower()}"
+
+        # Select video codec - simplified to use h264 by default
         video_codec_param = ""
         video_encoder_param = ""
-        if self.config.codec.lower() == "auto":
-            try:
-                from scrcpy_py_ddlx.client.capability_cache import CapabilityCache
-                cache = CapabilityCache.get_instance()
-                optimal_config = cache.get_optimal_config(device_serial)
-                logger.info(f"Auto-selected codec for ADB tunnel: {optimal_config.codec}")
-                video_codec_param = f"video_codec={optimal_config.codec}"
-                # Also specify the exact hardware encoder if available
-                if optimal_config.encoder_name:
-                    video_encoder_param = f"video_encoder={optimal_config.encoder_name}"
-                    logger.info(f"Using hardware encoder: {optimal_config.encoder_name}")
-            except Exception as e:
-                logger.warning(f"Failed to auto-select codec: {e}, using h264")
+        if self.config.video:
+            # Only send codec info if video is enabled
+            if self.config.codec.lower() == "auto":
                 video_codec_param = "video_codec=h264"
-        else:
-            video_codec_param = f"video_codec={self.config.codec.lower()}"
+                logger.info(f"Auto codec for ADB tunnel: h264 (default)")
+            else:
+                video_codec_param = f"video_codec={self.config.codec.lower()}"
 
         # Low latency optimization parameters
         low_latency_params = f"low_latency={str(self.config.low_latency).lower()}"
@@ -1533,6 +1527,7 @@ class ScrcpyClient:
         server_params = (
             f"scid={scid:08x} "
             f"tunnel_forward=true "
+            f"{video_params} "
             f"{audio_params} "
             f"control=true "
             f"{clipboard_params} "
@@ -1565,19 +1560,46 @@ class ScrcpyClient:
         retry_delay = 0.1  # 100ms between retries
         connected = False
 
+        # Determine which socket to connect first (based on video/audio settings)
+        # Server sends dummy byte on the FIRST connected socket
+        if self.config.video:
+            # Video enabled: connect video socket first
+            first_socket = "video"
+        elif self.config.audio:
+            # Video disabled but audio enabled: connect audio socket first
+            first_socket = "audio"
+        else:
+            # Video and audio disabled: connect control socket first
+            first_socket = "control"
+
+        first_sock = None  # Initialize to avoid UnboundLocalError in except block
+
         for attempt in range(max_retries):
-            self.state.video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.state.video_socket.settimeout(10.0)
             try:
                 logger.debug(f"Connection attempt {attempt + 1}/{max_retries}")
-                self.state.video_socket.connect(("127.0.0.1", local_port))
+
+                # Create a new socket for each attempt (socket may be closed from previous attempt)
+                if first_socket == "video":
+                    self.state.video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.state.video_socket.settimeout(10.0)
+                    self.state.video_socket.connect(("127.0.0.1", local_port))
+                    first_sock = self.state.video_socket
+                elif first_socket == "audio":
+                    self.state.audio_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.state.audio_socket.settimeout(10.0)
+                    self.state.audio_socket.connect(("127.0.0.1", local_port))
+                    first_sock = self.state.audio_socket
+                else:
+                    self.state.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.state.control_socket.settimeout(10.0)
+                    self.state.control_socket.connect(("127.0.0.1", local_port))
+                    first_sock = self.state.control_socket
+
                 logger.info("Connected to server!")
 
                 # Step 5: IMMEDIATELY read dummy byte (no extra delay!)
-                self.state.video_socket.settimeout(
-                    3.0
-                )  # 3 second timeout for dummy byte
-                dummy_byte = self.state.video_socket.recv(1)
+                first_sock.settimeout(3.0)  # 3 second timeout for dummy byte
+                dummy_byte = first_sock.recv(1)
                 logger.debug(f"Received {len(dummy_byte)} bytes")
 
                 if len(dummy_byte) == 0:
@@ -1592,21 +1614,41 @@ class ScrcpyClient:
                 break
             except Exception as e:
                 logger.debug(f"Connection attempt {attempt + 1} failed: {e}")
-                self.state.video_socket.close()
+                # Close socket if it exists
+                if first_sock:
+                    try:
+                        first_sock.close()
+                    except:
+                        pass
+                # Clear the socket reference
+                if first_socket == "video":
+                    self.state.video_socket = None
+                elif first_socket == "audio":
+                    self.state.audio_socket = None
+                else:
+                    self.state.control_socket = None
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
 
         if not connected:
             raise ConnectionError("Failed to connect after multiple attempts")
 
-        self.state.video_socket.settimeout(10.0)  # Restore timeout for subsequent reads
+        # Restore timeout
+        if first_socket == "video":
+            self.state.video_socket.settimeout(10.0)
+        elif first_socket == "audio":
+            self.state.audio_socket.settimeout(10.0)
+        else:
+            self.state.control_socket.settimeout(10.0)
 
-        # Step 6: Connect audio socket (if audio is enabled)
+        # Step 6: Connect remaining sockets
         # CRITICAL: Official scrcpy order is video -> audio -> control
+        # Only connect sockets that weren't already connected as first_socket
         logger.info(
-            f"[SOCKET ORDER] Video connected (1/3). Audio enabled: {self.config.audio}"
+            f"[SOCKET ORDER] First socket ({first_socket}) connected. "
+            f"Video: {self.config.video}, Audio: {self.config.audio}"
         )
-        if self.config.audio:
+        if self.config.audio and first_socket != "audio":
             logger.info("[SOCKET ORDER] Connecting audio socket (2/3)...")
             self.state.audio_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.state.audio_socket.settimeout(5.0)
@@ -1627,23 +1669,46 @@ class ScrcpyClient:
 
         # Step 7: Connect control socket (required for sending key events)
         # CRITICAL: Must be AFTER audio socket (official order: video -> audio -> control)
-        logger.info("[SOCKET ORDER] Connecting control socket (3/3)...")
-        self.state.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.state.control_socket.settimeout(5.0)
+        # Only connect if not already connected as first_socket
+        if first_socket != "control":
+            logger.info("[SOCKET ORDER] Connecting control socket (3/4)...")
+            self.state.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.state.control_socket.settimeout(5.0)
+
+            try:
+                self.state.control_socket.connect(("127.0.0.1", local_port))
+                # Control socket does NOT receive dummy byte (only first socket does)
+                logger.info("✓ Control socket connected")
+
+                # Disable Nagle's algorithm for control socket (official scrcpy does this)
+                self.state.control_socket.setsockopt(
+                    socket.IPPROTO_TCP, socket.TCP_NODELAY, 1
+                )
+            except Exception as e:
+                logger.error(f"Control socket connection failed: {e}")
+                self.state.control_socket = None  # Mark as not connected
+                # Continue anyway - control is optional for basic viewing
+        else:
+            logger.info("[SOCKET ORDER] Control socket already connected (was first socket)")
+
+        # Step 8: Connect file socket (required by server even if not used by client)
+        # Server always enables file transfer and waits for this connection
+        logger.info("[SOCKET ORDER] Connecting file socket (4/4)...")
+        self._file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._file_socket.settimeout(5.0)
 
         try:
-            self.state.control_socket.connect(("127.0.0.1", local_port))
-            # Control socket does NOT receive dummy byte (only first socket does)
-            logger.info("✓ Control socket connected")
+            self._file_socket.connect(("127.0.0.1", local_port))
+            logger.info("✓ File socket connected")
 
-            # Disable Nagle's algorithm for control socket (official scrcpy does this)
-            self.state.control_socket.setsockopt(
+            # Disable Nagle's algorithm for file socket
+            self._file_socket.setsockopt(
                 socket.IPPROTO_TCP, socket.TCP_NODELAY, 1
             )
         except Exception as e:
-            logger.error(f"Control socket connection failed: {e}")
-            self.state.control_socket = None  # Mark as not connected
-            # Continue anyway - control is optional for basic viewing
+            logger.error(f"File socket connection failed: {e}")
+            self._file_socket = None  # Mark as not connected
+            # Continue anyway - file transfer is optional
 
         tunnel = type(
             "obj",
@@ -1883,10 +1948,15 @@ class ScrcpyClient:
         import struct
 
         # Determine which socket to read device name from
-        # Network mode: control_socket; ADB tunnel mode: video_socket
+        # Server's getFirstSocket() returns: videoSocket -> audioSocket -> controlSocket
+        # So in video=false mode, server sends via controlSocket
         if self.state.network_mode and self.state.control_socket:
             name_socket = self.state.control_socket
             logger.debug("Reading device name from control socket (network mode)...")
+        elif not self.config.video and self.state.control_socket:
+            # video=false mode: server sends device name via control socket
+            name_socket = self.state.control_socket
+            logger.debug("Reading device name from control socket (video=false mode)...")
         else:
             name_socket = self.state.video_socket
             logger.debug("Reading device name from video socket (ADB tunnel mode)...")

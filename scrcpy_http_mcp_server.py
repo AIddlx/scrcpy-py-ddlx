@@ -34,11 +34,30 @@ try:
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.requests import Request
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse as StarletteJSONResponse
     import uvicorn
     STARLETTE_AVAILABLE = True
 except ImportError:
     STARLETTE_AVAILABLE = False
+
+
+class JSONResponse(StarletteJSONResponse):
+    """自定义 JSONResponse，确保 UTF-8 编码支持"""
+    def __init__(self, content, status_code=200, headers=None, media_type=None):
+        # 确保媒体类型包含 charset=utf-8
+        if media_type is None:
+            media_type = "application/json; charset=utf-8"
+        super().__init__(content, status_code=status_code, headers=headers, media_type=media_type)
+
+    def render(self, content):
+        # 使用 ensure_ascii=False 确保非 ASCII 字符正确输出
+        import json
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            indent=None,
+            separators=(",", ":")
+        ).encode("utf-8")
 
 # 配置日志 - 使用统一的日志配置模块
 from scrcpy_py_ddlx.core.logging_config import setup_logging, get_cache_dir
@@ -2526,29 +2545,11 @@ class ScrcpyMCPHandler:
                             # 获取 discovery_port（用于 UDP 唤醒）
                             discovery_port = arguments.get("discovery_port", 27183)
 
-                            # 自动检测编解码器（auto 不能直接传给服务端）
+                            # 编解码器选择：auto 默认使用 h264（暂停复杂协商）
                             actual_codec = video_codec
                             if video_codec.lower() == "auto":
-                                try:
-                                    from scrcpy_py_ddlx.client.capability_cache import CapabilityCache
-                                    cache = CapabilityCache.get_instance()
-                                    # 获取当前设备 serial
-                                    serial_arg = ["-s", device_id] if device_id else []
-                                    serial_result = subprocess.run(
-                                        ["adb"] + serial_arg + ["shell", "getprop ro.serialno"],
-                                        capture_output=True, text=True, timeout=5
-                                    )
-                                    device_serial = serial_result.stdout.strip() if serial_result.returncode == 0 else None
-                                    if device_serial:
-                                        optimal_config = cache.get_optimal_config(device_serial)
-                                        actual_codec = optimal_config.codec
-                                        logger.info(f"Auto-selected codec for {device_serial}: {actual_codec}")
-                                    else:
-                                        actual_codec = "h264"
-                                        logger.warning("Could not get device serial, using h264")
-                                except Exception as e:
-                                    actual_codec = "h264"
-                                    logger.warning(f"Failed to auto-select codec: {e}, using h264")
+                                actual_codec = "h264"
+                                logger.debug(f"Auto codec selected: h264 (default)")
 
                             server_cmd = (
                                 f"CLASSPATH={remote_path} app_process / "
@@ -3598,8 +3599,13 @@ async def _execute_tool(tool_name: str, params: dict) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def on_shutdown():
-    """Cleanup on server shutdown."""
+def on_shutdown(force_exit=True):
+    """Cleanup on server shutdown.
+
+    Args:
+        force_exit: If True, call os._exit(0) after cleanup (for signal handlers).
+                   If False, just cleanup (for atexit).
+    """
     import threading
     import sys
     import multiprocessing as mp
@@ -3669,9 +3675,10 @@ def on_shutdown():
 
     # Force exit to bypass lingering QueueFeederThread issues
     # These daemon threads shouldn't block exit, but sometimes do on Windows
-    import os
-    logger.info("Forcing exit to ensure clean shutdown...")
-    os._exit(0)
+    if force_exit:
+        import os
+        logger.info("Forcing exit to ensure clean shutdown...")
+        os._exit(0)
 
 
 # Simple app without lifespan events (lifespan="off" in uvicorn)
@@ -3932,6 +3939,29 @@ Quick Start Examples:
     port = args.port
     host = args.host
 
+    # 检查并清理占用端口的残留进程
+    import subprocess
+    try:
+        # 检查端口是否被占用
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.split('\n'):
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.split()
+                if len(parts) >= 5:
+                    pid = parts[-1]
+                    if pid.isdigit():
+                        logger.warning(f"端口 {port} 被进程 {pid} 占用，正在清理...")
+                        subprocess.run(["taskkill", "/F", "/PID", pid],
+                                      capture_output=True, timeout=5)
+                        import time
+                        time.sleep(0.5)  # 等待端口释放
+                        logger.info(f"已清理残留进程 {pid}")
+    except Exception as e:
+        logger.debug(f"端口检查失败（可忽略）: {e}")
+
     logger.info("=" * 70)
     logger.info(f"启动 Scrcpy HTTP MCP 服务器")
     logger.info(f"端口: {port}")
@@ -3968,6 +3998,7 @@ Quick Start Examples:
     # 设置信号处理器 - Ctrl+C 退出
     import signal
     import os
+    import atexit
 
     def signal_handler(signum, frame):
         """Handle Ctrl+C - graceful shutdown."""
@@ -3978,7 +4009,13 @@ Quick Start Examples:
             logger.error(f"Shutdown error: {e}")
         os._exit(0)
 
+    # 注册多个信号处理器
     signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)  # taskkill 会发送这个信号
+
+    # atexit 作为后备（不保证在所有情况下都被调用）
+    # 注意：atexit 调用时不应该 os._exit()，否则其他 atexit 函数不会执行
+    atexit.register(on_shutdown, force_exit=False)
 
     # Start auto-connect in background thread (since lifespan is disabled)
     if _auto_connect or _network_device or _network_push_device:

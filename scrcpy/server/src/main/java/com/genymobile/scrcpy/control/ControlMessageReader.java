@@ -48,7 +48,14 @@ public class ControlMessageReader {
             case ControlMessage.TYPE_OPEN_HARD_KEYBOARD_SETTINGS:
             case ControlMessage.TYPE_RESET_VIDEO:
             case ControlMessage.TYPE_GET_APP_LIST:
+            case ControlMessage.TYPE_REQUEST_VIDEO_FRAME:
+            case ControlMessage.TYPE_START_VIDEO:
+            case ControlMessage.TYPE_STOP_VIDEO:
+            case ControlMessage.TYPE_START_AUDIO:
+            case ControlMessage.TYPE_STOP_AUDIO:
                 return ControlMessage.createEmpty(type);
+            case ControlMessage.TYPE_SCREENSHOT:
+                return parseScreenshot();
             case ControlMessage.TYPE_UHID_CREATE:
                 return parseUhidCreate();
             case ControlMessage.TYPE_UHID_INPUT:
@@ -59,6 +66,8 @@ public class ControlMessageReader {
                 return parseStartApp();
             case ControlMessage.TYPE_PING:
                 return parsePing();
+            case ControlMessage.TYPE_OPEN_FILE_CHANNEL:
+                return parseOpenFileChannel();
             default:
                 throw new ControlProtocolException("Unknown event type: " + type);
         }
@@ -172,6 +181,20 @@ public class ControlMessageReader {
     private ControlMessage parsePing() throws IOException {
         long timestamp = dis.readLong();
         return ControlMessage.createPing(timestamp);
+    }
+
+    private ControlMessage parseOpenFileChannel() throws IOException {
+        // Empty message, only type byte
+        return ControlMessage.createOpenFileChannel();
+    }
+
+    private ControlMessage parseScreenshot() throws IOException {
+        // 1 byte: JPEG quality (1-100)
+        int quality = dis.readUnsignedByte();
+        // Clamp to valid range
+        if (quality < 1) quality = 1;
+        if (quality > 100) quality = 100;
+        return ControlMessage.createScreenshot(quality);
     }
 
     private Position parsePosition() throws IOException {

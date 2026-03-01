@@ -12,7 +12,7 @@ import java.util.List;
 
 public class DeviceMessageWriter {
 
-    private static final int MESSAGE_MAX_SIZE = 1 << 18; // 256k
+    private static final int MESSAGE_MAX_SIZE = 1 << 22; // 4MB (supports 4K screenshots)
     public static final int CLIPBOARD_TEXT_MAX_LENGTH = MESSAGE_MAX_SIZE - 5; // type: 1 byte; length: 4 bytes
     public static final int SCREENSHOT_MAX_SIZE = MESSAGE_MAX_SIZE - 5; // type: 1 byte; length: 4 bytes
 
@@ -69,6 +69,10 @@ public class DeviceMessageWriter {
                 break;
             case DeviceMessage.TYPE_PONG:
                 dos.writeLong(msg.getTimestamp());
+                break;
+            case DeviceMessage.TYPE_FILE_CHANNEL_INFO:
+                dos.writeShort(msg.getPort());
+                dos.writeInt(msg.getSessionId());
                 break;
             default:
                 throw new ControlProtocolException("Unknown event type: " + type);

@@ -71,7 +71,24 @@
       "Bash(pip show:*)",
       "Bash(head:*)",
       "Bash(py-spy top:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(echo sed failed:*)",
+      "mcp__zread__search_doc",
+      "mcp__zread__get_repo_structure",
+      "mcp__zread__read_file",
+      "mcp__web-reader__webReader",
+      "Bash(adb:*)",
+      "Bash(MSYS_NO_PATHCONV=1 adb:*)",
+      "Bash(echo No ports in use:*)",
+      "Bash(echo === Process ===:*)",
+      "Bash(taskkill:*)",
+      "Bash(echo Server not ready:*)",
+      "Bash(netstat -ano)",
+      "Bash(sleep 15:*)",
+      "Bash(/c/Users/ming1/AppData/Local/Android/Sdk/platform-tools/adb.exe shell:*)",
+      "mcp__zai-mcp-server__analyze_image",
+      "Bash(sleep 8:*)",
+      "Bash(xxd:*)"
     ]
   }
 }
