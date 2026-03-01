@@ -52,13 +52,23 @@
 |------|--------|------|
 | `--reuse` | False | 复用服务器 |
 | `--push/--no-push` | push | 推送 APK |
-| `--stay-alive` | False | Stay-Alive 模式 |
+| `--stay-alive` | False | Stay-Alive 模式（使用 setsid 持久化） |
+| `--hot-connect` | False | 自动发现并连接设备（无需指定 IP） |
+| `--discover-timeout` | 5 | 发现超时（秒） |
 
 ### 认证
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--auth/--no-auth` | auth | 启用/禁用认证 |
+| `--auth/--no-auth` | no-auth | 启用/禁用认证（同时控制客户端和服务端） |
+
+### 调试选项
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-v/--verbose` | False | 详细日志（DEBUG 级别） |
+| `-q/--quiet` | False | 安静模式（WARNING 级别） |
+| `--no-tracker` | False | 禁用 latency_tracker（节省 CPU） |
 
 ---
 
@@ -119,10 +129,20 @@ python tests_gui/test_network_direct.py \
 
 ## 日志
 
+日志存放在用户缓存目录：
+
 ```
-test_logs/scrcpy_network_test_YYYYMMDD_HHMMSS.log
-test_logs/scrcpy_network_test_YYYYMMDD_HHMMSS_server.log
+~/.cache/scrcpy-py-ddlx/logs/test_gui_logs/scrcpy_network_test_YYYYMMDD_HHMMSS.log
+~/.cache/scrcpy-py-ddlx/logs/test_gui_logs/scrcpy_network_test_YYYYMMDD_HHMMSS_server.log
 ```
+
+### 日志级别
+
+| 选项 | 文件级别 | 控制台级别 |
+|------|----------|------------|
+| 默认 | DEBUG | INFO |
+| `-v/--verbose` | DEBUG | DEBUG |
+| `-q/--quiet` | WARNING | WARNING |
 
 ---
 

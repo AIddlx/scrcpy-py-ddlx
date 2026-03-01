@@ -97,6 +97,8 @@ push_key_to_device("device_serial", key)
 
 ## 使用方式
 
+### Python API
+
 ```python
 from scrcpy_py_ddlx import Client
 
@@ -104,10 +106,31 @@ from scrcpy_py_ddlx import Client
 client = Client(
     device="192.168.1.100:5555",
     network_mode=True,
-    enable_auth=True  # 默认启用
+    auth_enabled=True  # 默认启用
 )
 client.start()
 ```
+
+### 命令行
+
+```bash
+# 启用认证（默认）
+python tests_gui/test_network_direct.py --auth --ip 192.168.1.100
+
+# 禁用认证（同时禁用客户端和服务端）
+python tests_gui/test_network_direct.py --no-auth --ip 192.168.1.100
+```
+
+### --no-auth 行为
+
+`--no-auth` 参数会同时影响：
+
+| 组件 | 行为 |
+|------|------|
+| 服务端 | 以 `auth_enabled=false` 启动，不要求认证 |
+| 客户端 | 不加载本地密钥，跳过认证流程 |
+
+这样可以实现无认证的快速连接，适用于可信网络环境。
 
 ## 相关文档
 

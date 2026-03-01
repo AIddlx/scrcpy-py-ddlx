@@ -71,6 +71,43 @@ client = Client(
 client.start()
 ```
 
+### 命令行选项
+
+```bash
+# 基本连接
+python tests_gui/test_network_direct.py --ip 192.168.1.100
+
+# Hot-connect 自动发现（无需指定 IP）
+python tests_gui/test_network_direct.py --hot-connect
+
+# Stay-alive 模式（USB 断开后服务端仍驻留）
+python tests_gui/test_network_direct.py --stay-alive --ip 192.168.1.100
+
+# 禁用认证
+python tests_gui/test_network_direct.py --no-auth --ip 192.168.1.100
+```
+
+### Stay-Alive 模式
+
+使用 `setsid` 创建新会话，使服务端进程与 ADB shell 进程组分离：
+
+```
+ADB shell ──► nohup setsid sh -c 'server_cmd' &
+                 │
+                 └──► Server (独立会话)
+                      │
+                      └── USB 断开后仍运行
+```
+
+### Hot-Connect 自动发现
+
+无需指定 IP，自动发现网络中的设备：
+
+```bash
+python tests_gui/test_network_direct.py --hot-connect
+# 自动发现并连接第一个设备
+```
+
 ## 优缺点
 
 ### 优点

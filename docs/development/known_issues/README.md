@@ -30,6 +30,7 @@
 
 | 文件 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
+| [NV12 零拷贝优化](nv12_zero_copy_optimization.md) | DelayBuffer 路径使用 semi-planar 格式，预计 CPU 从 3-4% 降至 1.5% | 中 | ⏳ 待实现 |
 | [I-frame 间隔不稳定](iframe_interval_issue.md) | KEY_I_FRAME_INTERVAL 参数不可靠 | 中 | ⏳ 待实现 |
 | [视频录制功能](video_recording.md) | MCP 动态录制视频（带音频） | 中 | ✅ 已实现 |
 | [录音时长问题](audio_recording_duration.md) | 录音时长可能少于设定时间 | 低 | 待改进 |

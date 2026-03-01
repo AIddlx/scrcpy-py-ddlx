@@ -83,13 +83,33 @@ config = ClientConfig(
 
 ---
 
+## 命令行选项
+
+### 调试选项
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-v/--verbose` | False | 详细日志（DEBUG 级别） |
+| `-q/--quiet` | False | 安静模式（WARNING 级别） |
+| `--no-tracker` | False | 禁用 latency_tracker（节省 CPU） |
+
+---
+
 ## 日志
 
+日志存放在用户缓存目录：
+
 ```
-scrcpy_test_YYYYMMDD_HHMMSS.log
+~/.cache/scrcpy-py-ddlx/logs/test_gui_logs/scrcpy_test_YYYYMMDD_HHMMSS.log
 ```
 
-DEBUG 级别写入文件，INFO 级别输出控制台。
+### 日志级别
+
+| 选项 | 文件级别 | 控制台级别 |
+|------|----------|------------|
+| 默认 | DEBUG | INFO |
+| `-v/--verbose` | DEBUG | DEBUG |
+| `-q/--quiet` | WARNING | WARNING |
 
 ---
 
@@ -98,6 +118,9 @@ DEBUG 级别写入文件，INFO 级别输出控制台。
 ```bash
 cd C:\Project\IDEA\2\new\scrcpy-py-ddlx
 python -X utf8 tests_gui/test_direct.py
+
+# 安静模式 + 禁用 tracker（最低 CPU）
+python -X utf8 tests_gui/test_direct.py -q --no-tracker
 ```
 
 ---
