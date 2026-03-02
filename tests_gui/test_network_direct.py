@@ -292,9 +292,14 @@ Server Lifecycle Modes:
     # Debug settings
     dbg_group = parser.add_argument_group('Debug Settings')
     dbg_group.add_argument('-v', '--verbose', action='store_true',
-                           help='Enable verbose output')
+                           help='Enable verbose output (equivalent to --log-level=DEBUG)')
     dbg_group.add_argument('-q', '--quiet', action='store_true',
-                           help='Quiet mode (warnings only)')
+                           help='Quiet mode (warnings only, equivalent to --log-level=WARNING)')
+    dbg_group.add_argument('--log-level', type=str, default=None,
+                           choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                           help='Log level (default: WARNING). Env: SCRCPY_DEBUG=1 for DEBUG')
+    dbg_group.add_argument('--log-keep', type=int, default=None,
+                           help='Number of log files to keep (default: 3)')
     dbg_group.add_argument('--no-tracker', dest='no_tracker', action='store_true',
                            help='Disable latency tracker to save CPU')
     dbg_group.add_argument('--show-details', dest='show_details', action='store_true',
@@ -709,36 +714,35 @@ def start_server(args, device_serial: str = None):
 
 def setup_logging(args):
     """Configure logging based on arguments."""
+    from scrcpy_py_ddlx.core.logging_config import setup_logging as _setup_logging, get_effective_log_level, get_effective_log_keep
+
+    # 确定日志级别
     if args.quiet:
-        file_level = logging.WARNING
-        console_level = logging.WARNING
+        level = logging.WARNING
     elif args.verbose:
-        file_level = logging.DEBUG
-        console_level = logging.DEBUG
+        level = logging.DEBUG
+    elif args.log_level:
+        level = getattr(logging, args.log_level.upper(), logging.WARNING)
     else:
-        file_level = logging.DEBUG  # Default: DEBUG for debugging
-        console_level = logging.INFO
+        level = None  # 使用环境变量或默认值
 
-    # Put logs in user cache directory (same as MCP server)
-    log_dir = Path.home() / ".cache" / "scrcpy-py-ddlx" / "logs" / "test_gui_logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_filename = str(log_dir / f"scrcpy_network_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    # 确定保留数量
+    log_keep = args.log_keep
 
-    # File handler with appropriate level
-    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
-    file_handler.setLevel(file_level)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    # 使用统一的日志配置
+    log_file = _setup_logging(
+        prefix="test_gui_logs/scrcpy_network_test",
+        level=level,
+        log_keep=log_keep,
+        quiet_console=False
+    )
 
-    # Console handler with appropriate level
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(console_level)
-    console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Allow all levels, handlers filter
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    # 显示日志配置信息
+    effective_level = get_effective_log_level(level)
+    effective_keep = get_effective_log_keep(log_keep)
+    if log_file:
+        print(f"[INFO] 日志文件: {log_file}")
+    print(f"[INFO] 日志级别: {logging.getLevelName(effective_level)}, 保留数量: {effective_keep}")
 
     # Disable latency tracker if requested
     if getattr(args, 'no_tracker', False):
@@ -746,7 +750,7 @@ def setup_logging(args):
         disable_tracker()
         print("[INFO] Latency tracker disabled")
 
-    return log_filename
+    return log_file
 
 
 def main():

@@ -24,50 +24,37 @@ from datetime import datetime
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# 配置日志
-import logging.handlers
+# 配置日志 - 使用统一的日志配置模块
+from scrcpy_py_ddlx.core.logging_config import setup_logging, get_effective_log_level, get_effective_log_keep
 
-# 创建日志目录（用户缓存目录，与 MCP 服务器一致）
-log_dir = Path.home() / ".cache" / "scrcpy-py-ddlx" / "logs" / "test_gui_logs"
-log_dir.mkdir(parents=True, exist_ok=True)
-log_filename = str(log_dir / f"scrcpy_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+# 解析命令行参数中的日志选项
+import argparse
+log_parser = argparse.ArgumentParser(add_help=False)
+log_parser.add_argument("--log-level", type=str, default=None,
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Log level")
+log_parser.add_argument("--log-keep", type=int, default=None,
+                        help="Number of log files to keep")
+log_args, _ = log_parser.parse_known_args()
 
-# 创建格式化器
-detailed_formatter = logging.Formatter(
-    fmt='%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+# 设置日志（使用 test_gui_logs 子目录）
+log_file = setup_logging(
+    prefix="test_gui_logs/scrcpy_test",
+    level=logging.DEBUG if log_args.log_level == "DEBUG" else (
+        {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING,
+         "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL}.get(log_args.log_level, None)
+    ) if log_args.log_level else None,
+    log_keep=log_args.log_keep
 )
-
-# 配置根日志记录器
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)
-
-# 清除现有的处理器
-root_logger.handlers.clear()
-
-# 文件处理器 - 详细格式
-file_handler = logging.FileHandler(log_filename, encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(detailed_formatter)
-
-# 控制台处理器 - 精简格式（只显示级别和消息）
-console_formatter = logging.Formatter(
-    fmt='%(levelname)s - %(message)s'
-)
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(console_formatter)
-
-# 添加处理器
-root_logger.addHandler(file_handler)
-root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 
 # 提示日志文件位置
-print(f"[INFO] 日志将保存到: {log_filename}")
-print(f"[INFO] 详细级别: DEBUG (所有日志)")
-print(f"[INFO] 控制台级别: INFO (INFO及以上)")
+effective_level = get_effective_log_level()
+effective_keep = get_effective_log_keep(log_args.log_keep)
+if log_file:
+    print(f"[INFO] 日志文件: {log_file}")
+print(f"[INFO] 日志级别: {logging.getLevelName(effective_level)}, 保留数量: {effective_keep}")
 print()
 
 # 全局变量保持窗口和客户端存活

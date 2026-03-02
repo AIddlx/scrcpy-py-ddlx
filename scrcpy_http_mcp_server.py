@@ -4351,6 +4351,22 @@ Quick Start Examples:
     parser.add_argument("--stop-server", action="store_true", default=False,
                         help="Stop persisted server on device and exit (requires USB)")
 
+    # ========== Logging Settings ==========
+
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Log level (default: WARNING). Env: SCRCPY_DEBUG=1 for DEBUG, SCRCPY_LOG_LEVEL for custom"
+    )
+    parser.add_argument(
+        "--log-keep",
+        type=int,
+        default=None,
+        help="Number of log files to keep (default: 3). Env: SCRCPY_LOG_KEEP"
+    )
+
     # ========== Server Settings ==========
 
     parser.add_argument(
@@ -4387,10 +4403,29 @@ Quick Start Examples:
     )
     args = parser.parse_args()
 
-    # 重新配置日志为静默模式（控制台只显示 ERROR+）
-    # 用户友好的信息用 print() 输出
-    log_file = setup_logging(prefix="session", quiet_console=True)
-    logger.info(f"日志文件: {log_file}")
+    # 解析日志级别参数
+    log_level = None
+    if args.log_level:
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL,
+        }
+        log_level = level_map.get(args.log_level.upper())
+
+    # 重新配置日志
+    # 控制台静默模式（用户友好信息用 print() 输出）
+    # 日志级别和保留数量由环境变量/命令行参数/默认值决定
+    log_file = setup_logging(
+        prefix="session",
+        level=log_level,
+        quiet_console=True,
+        log_keep=args.log_keep
+    )
+    if log_file:
+        logger.info(f"日志文件: {log_file}")
 
     # 保存默认音频配置到全局变量
     global DEFAULT_AUDIO_ENABLED, DEFAULT_AUDIO_DUP

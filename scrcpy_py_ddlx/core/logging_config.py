@@ -5,7 +5,13 @@
 - 用户缓存目录存储日志
 - 自动清理旧日志
 - 控制台简要输出
-- 文件全量输出
+- 文件输出（级别可配置）
+
+日志级别控制（优先级从高到低）：
+1. 环境变量 SCRCPY_DEBUG=1        → DEBUG（开发者强制全量日志）
+2. 环境变量 SCRCPY_LOG_LEVEL=X    → 指定级别
+3. 命令行参数 --log-level=X       → 指定级别
+4. 默认值                          → WARNING（普通用户最少日志）
 
 Usage:
     from scrcpy_py_ddlx.core.logging_config import setup_logging, get_log_dir
@@ -15,14 +21,116 @@ Usage:
 
     # 设置日志（返回日志文件路径）
     log_file = setup_logging(prefix="session")
+
+    # 或指定级别
+    log_file = setup_logging(prefix="session", level=logging.INFO)
 """
 
 import logging
 import sys
+import os
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
+
+
+# ============================================================================
+# 日志级别常量
+# ============================================================================
+
+# 默认日志级别（普通用户）
+DEFAULT_LOG_LEVEL = logging.WARNING
+
+# 默认保留日志文件数量
+DEFAULT_LOG_KEEP = 3
+
+# 环境变量名
+ENV_DEBUG = "SCRCPY_DEBUG"
+ENV_LOG_LEVEL = "SCRCPY_LOG_LEVEL"
+ENV_LOG_KEEP = "SCRCPY_LOG_KEEP"
+
+
+def parse_log_level(value: str) -> int:
+    """
+    解析日志级别字符串。
+
+    Args:
+        value: 级别字符串，如 "DEBUG", "INFO", "WARNING", "ERROR" 或数字
+
+    Returns:
+        logging 级别常量
+    """
+    if value.isdigit():
+        return int(value)
+
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "WARN": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+    return level_map.get(value.upper(), DEFAULT_LOG_LEVEL)
+
+
+def get_effective_log_level(arg_level: int = None) -> int:
+    """
+    获取生效的日志级别。
+
+    优先级（从高到低）：
+    1. SCRCPY_DEBUG=1 → DEBUG
+    2. SCRCPY_LOG_LEVEL → 指定级别
+    3. 命令行参数 arg_level
+    4. 默认值 WARNING
+
+    Args:
+        arg_level: 命令行参数指定的级别
+
+    Returns:
+        生效的日志级别
+    """
+    # 1. SCRCPY_DEBUG 环境变量（开发者强制全量日志）
+    if os.environ.get(ENV_DEBUG, "").lower() in ("1", "true", "yes"):
+        return logging.DEBUG
+
+    # 2. SCRCPY_LOG_LEVEL 环境变量
+    env_level = os.environ.get(ENV_LOG_LEVEL)
+    if env_level:
+        return parse_log_level(env_level)
+
+    # 3. 命令行参数
+    if arg_level is not None:
+        return arg_level
+
+    # 4. 默认值（普通用户最少日志）
+    return DEFAULT_LOG_LEVEL
+
+
+def get_effective_log_keep(arg_keep: int = None) -> int:
+    """
+    获取生效的日志保留数量。
+
+    优先级：
+    1. SCRCPY_LOG_KEEP 环境变量
+    2. 命令行参数 arg_keep
+    3. 默认值 3
+
+    Args:
+        arg_keep: 命令行参数指定的保留数量
+
+    Returns:
+        生效的保留数量
+    """
+    env_keep = os.environ.get(ENV_LOG_KEEP)
+    if env_keep and env_keep.isdigit():
+        return int(env_keep)
+
+    if arg_keep is not None:
+        return arg_keep
+
+    return DEFAULT_LOG_KEEP
 
 
 def get_cache_dir() -> Path:
@@ -88,13 +196,14 @@ def save_config(config: dict) -> None:
         json.dump(config, f, indent=2)
 
 
-def cleanup_old_logs(prefix: str = None, max_sessions: int = None) -> List[Path]:
+def cleanup_old_logs(prefix: str = None, max_sessions: int = None, log_dir: Path = None) -> List[Path]:
     """
     清理旧的日志文件。
 
     Args:
         prefix: 日志文件前缀（如 "session", "preview"），None 表示所有
         max_sessions: 最大保留数量，None 则从配置读取
+        log_dir: 日志目录，None 则使用默认目录
 
     Returns:
         删除的文件列表
@@ -103,7 +212,8 @@ def cleanup_old_logs(prefix: str = None, max_sessions: int = None) -> List[Path]
         config = load_config()
         max_sessions = config.get("max_sessions", 3)
 
-    log_dir = get_log_dir()
+    if log_dir is None:
+        log_dir = get_log_dir()
 
     # 获取所有日志文件
     if prefix:
@@ -344,53 +454,95 @@ class BriefFormatter(logging.Formatter):
 
 def setup_logging(
     prefix: str = "session",
-    console_level: int = logging.DEBUG,
-    file_level: int = logging.DEBUG,
+    level: int = None,
     log_format: str = '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-    cleanup: bool = True
-) -> Path:
+    cleanup: bool = True,
+    quiet_console: bool = False,
+    log_keep: int = None
+) -> Optional[Path]:
     """
     设置日志配置。
 
+    日志级别控制（优先级从高到低）：
+    1. 环境变量 SCRCPY_DEBUG=1        → DEBUG（开发者全量日志）
+    2. 环境变量 SCRCPY_LOG_LEVEL=X    → 指定级别
+    3. 命令行参数 level=X              → 指定级别
+    4. 默认值 WARNING                  → 普通用户最少日志
+
     Args:
         prefix: 日志文件前缀
-        console_level: 控制台日志级别
-        file_level: 文件日志级别
+        level: 日志级别（None 则使用环境变量或默认值）
         log_format: 日志格式
         cleanup: 是否清理旧日志
+        quiet_console: 控制台静默模式（只显示 ERROR+），用于 MCP 服务器
+        log_keep: 保留日志文件数量（None 则使用环境变量或默认值）
 
     Returns:
-        日志文件路径
+        日志文件路径，如果级别为 CRITICAL（禁用日志）则返回 None
     """
+    # 获取生效的日志级别
+    effective_level = get_effective_log_level(level)
+    effective_keep = get_effective_log_keep(log_keep)
+
+    # 如果级别为 CRITICAL，禁用日志文件
+    if effective_level >= logging.CRITICAL:
+        # 只配置控制台错误输出
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        root_logger.setLevel(logging.CRITICAL)
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(logging.CRITICAL)
+        console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+        root_logger.addHandler(console_handler)
+        return None
+
     # 确保日志目录存在
     log_dir = get_log_dir()
 
+    # 支持 prefix 中包含子目录（如 "test_gui_logs/scrcpy_test"）
+    prefix_path = Path(prefix.replace("\\", "/"))
+    if "/" in prefix:
+        # prefix 包含子目录
+        subdir = prefix_path.parent
+        file_prefix = prefix_path.name
+        log_dir = log_dir / subdir
+        log_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        file_prefix = prefix
+
     # 创建日志文件
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = log_dir / f"{prefix}_{timestamp}.log"
+    log_file = log_dir / f"{file_prefix}_{timestamp}.log"
 
     # 清理旧日志
     if cleanup:
-        cleanup_old_logs(prefix=prefix)
+        cleanup_old_logs(prefix=file_prefix, max_sessions=effective_keep, log_dir=log_dir)
 
     # 重置现有处理器
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # 文件处理器：保存全部日志
+    # 文件处理器：使用生效的日志级别
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(file_level)
+    file_handler.setLevel(effective_level)
     file_handler.setFormatter(logging.Formatter(log_format))
 
-    # 控制台处理器：简要输出
+    # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(console_level)
-    console_handler.setFormatter(BriefFormatter())
-    console_handler.addFilter(ConsoleFilter())
+    if quiet_console:
+        # 静默模式：只显示 ERROR+ 级别
+        console_handler.setLevel(logging.ERROR)
+        console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+    else:
+        # 正常模式：简要输出
+        console_handler.setLevel(effective_level)
+        console_handler.setFormatter(BriefFormatter())
+        console_handler.addFilter(ConsoleFilter())
 
     # 配置根日志器
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(effective_level)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
 
