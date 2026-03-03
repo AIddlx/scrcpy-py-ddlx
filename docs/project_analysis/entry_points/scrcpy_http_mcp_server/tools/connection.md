@@ -130,7 +130,7 @@
 {
   "devices": [
     {
-      "serial": "RF8M70QVZ6N",
+      "serial": "SAMSUNG_SERIAL_XXX",
       "status": "device",
       "model": "SM-S908B",
       "ip": "192.168.1.100"

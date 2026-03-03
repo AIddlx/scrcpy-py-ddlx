@@ -47,13 +47,8 @@ scrcpy-py-ddlx 完整文档索引。
 | 文档 | 说明 |
 |------|------|
 | **[开发流程规范](development/DEVELOPMENT_WORKFLOW.md)** | **必读** - 修改代码前的流程规范 |
-| [编译 Server](development/build.md) | 编译 scrcpy-server |
 | [测试脚本指南](TEST_NETWORK_DIRECT_GUIDE.md) | test_network_direct.py 完整参数和用法 |
 | [服务端代码分析](development/SERVER_CODE_ANALYSIS.md) | 代码结构分析（热连接基础） |
-| [架构设计](development/ARCHITECTURE_ANALYSIS.md) | 设计文档 |
-| [开发经验](development/lessons.md) | 开发经验总结 |
-| [Claude Code 集成](development/CLAUDE_CODE_INTEGRATION.md) | MCP 服务器设置 |
-| [MCP 服务器](development/MCP_SERVER.md) | MCP 服务器文档 |
 | [能力协商协议](development/CAPABILITY_NEGOTIATION.md) | 编码器协商和动态配置 |
 | [编解码能力检测](development/CODEC_CAPABILITY_DETECTION.md) | 手机/PC编解码器检测经验 |
 | [热连接实现方案](development/HOT_CONNECTION_IMPL_PLAN.md) | 持久服务端 + 客户端唤醒 |
@@ -76,14 +71,6 @@ scrcpy-py-ddlx 完整文档索引。
 | [开发规范](development/mcp_http_server/MCP_HTTP_SERVER_SPEC.md) | **必读** - 编码规范、工具定义、错误处理 |
 | [工作逻辑](development/mcp_http_server/MCP_HTTP_SERVER_LOGIC.md) | 请求处理、连接管理、状态控制 |
 | [升级计划](development/mcp_http_server/MCP_HTTP_SERVER_UPGRADE.md) | 功能改进计划 |
-
-### 重要修复
-
-| 文档 | 说明 |
-|------|------|
-| [视频冻结修复](development/VIDEO_FREEZING_FIX.md) | 短视频 app 修复 |
-| [流式 Demuxer 重构](development/STREAMING_DEMUXER_REFACTOR.md) | 流式重构 |
-| [GET_APP_LIST 实现](development/GET_APP_LIST_IMPLEMENTATION.md) | 应用列表功能 |
 
 ### 已知问题与待改进
 

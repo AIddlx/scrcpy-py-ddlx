@@ -64,7 +64,7 @@ macOS:   ~/.cache/scrcpy-py-ddlx/capability_cache.json
 
 {
   "pc_capability": { ... },           // PC 能力
-  "device_c96d1705": { ... },         // 设备1: realme RMX1931
+  "device_device_serial_abc123": { ... },         // 设备1: realme RMX1931
   "device_abc123": { ... },           // 设备2: 另一台手机
 }
 ```
@@ -577,7 +577,7 @@ from scrcpy_py_ddlx.client.capability_cache import (
 codec = get_optimal_codec()  # 返回 "h264", "h265", 或 "av1"
 
 # 获取当前连接的设备序列号
-serial = get_connected_device_serial()  # 返回 "c96d1705" 或 None
+serial = get_connected_device_serial()  # 返回 "device_serial_abc123" 或 None
 ```
 
 ### ClientConfig 集成
@@ -631,11 +631,11 @@ Cache exists: True
 
 Cached devices (2):
   - realme RMX1931 (Android 11)
-    Serial: c96d1705, Age: 2.5 days
+    Serial: device_serial_abc123, Age: 2.5 days
   - vivo iQOO 12 (Android 14)
     Serial: abc123, Age: 5.1 days
 
-Current device: c96d1705
+Current device: device_serial_abc123
 
 Optimal Configuration:
   Codec: H265

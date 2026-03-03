@@ -102,6 +102,38 @@ ScrcpyUdp: Discovery response: SCRCPY_HERE RMX1931 192.168.5.4 single
 
 ---
 
+## 6. 文档隐私审计与清理
+
+### 问题
+docs/ 目录有 233 个文档，未经过隐私审查，可能包含敏感信息。
+
+### 审计结果
+使用 Agent Team (privacy-auditor, doc-classifier, quality-checker) 进行全面审计：
+
+| 风险级别 | 发现 | 状态 |
+|----------|------|------|
+| 高 | 密码/API Key 泄露 | ✅ 无 |
+| 中 | 真实设备序列号 | ✅ 已修复 |
+| 中 | INDEX.md 死链接 | ✅ 已修复 |
+| 低 | 示例 IP/路径 | ✅ 正常 |
+
+### 修复内容
+| 文件 | 修改 |
+|------|------|
+| `CODEC_CAPABILITY_DETECTION.md` | 序列号 `c96d1705` → `device_serial_abc123` |
+| `startup_failure_cleanup.md` | 序列号 `c96d1705` → `device_serial_xyz789` |
+| `tools/connection.md` | 序列号 `RF8M70QVZ6N` → `SAMSUNG_SERIAL_XXX` |
+| `INDEX.md` | 移除 8 个死链接（不存在的文档） |
+
+### 文档分类建议
+```
+公开文档: docs/user/, docs/api/, 顶层指南
+内部文档: docs/development/, docs/project_analysis/
+临时文档: CHANGE-change.md 等（待清理）
+```
+
+---
+
 ## 5. 清理测试文件
 
 删除不再使用的测试文件：

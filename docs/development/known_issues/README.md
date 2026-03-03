@@ -31,6 +31,9 @@
 
 | 文件 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
+| [生命周期管理协定散乱](lifecycle_coordination.md) | 服务端断开时窗口无响应，缺少统一的状态管理器 | 中 | ⏳ 待重构 |
+| **半成品入口点** | `scrcpy_mcp_gui.py` GUI 客户端（未完成） | 低 | 🚧 半成品 |
+| **半成品入口点** | `mcp_stdio.py` MCP STDIO 模式（未完成） | 低 | 🚧 半成品 |
 | [NV12 零拷贝优化](nv12_zero_copy_optimization.md) | DelayBuffer 路径使用 semi-planar 格式，预计 CPU 从 3-4% 降至 1.5% | 中 | ⏳ 待实现 |
 | [I-frame 间隔不稳定](iframe_interval_issue.md) | KEY_I_FRAME_INTERVAL 参数不可靠 | 中 | ⏳ 待实现 |
 | [视频录制功能](video_recording.md) | MCP 动态录制视频（带音频） | 中 | ✅ 已实现 |
@@ -39,6 +42,7 @@
 | [Android 11 音频弹窗](android11_audio_popup.md) | Android 11 录音时出现短暂弹窗 | 低 | ✅ 已知限制 |
 | [Android 11+ 音频锁屏限制](audio_lock_screen_limitation.md) | 锁屏时启动音频失败，60秒内解锁可恢复 | 低 | ✅ 已知限制（有缓解措施） |
 | [录音透传模式](audio_passthrough_recording.md) | 透传模式暂回退为转码 | 中 | ⏳ 待实现 |
+| [服务端日志性能优化](server_log_optimization.md) | 高频日志添加 `if (Ln.isEnabled(VERBOSE))` 包装 | 中 | ⏳ 部分完成 |
 
 ---
 
