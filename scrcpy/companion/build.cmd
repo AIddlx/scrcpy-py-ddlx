@@ -5,8 +5,9 @@ set ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk
 set BUILD_TOOLS=%ANDROID_HOME%\build-tools\34.0.0
 set PLATFORM=%ANDROID_HOME%\platforms\android-34
 set BUILD_DIR=%~dp0build
+set APP_DIR=%~dp0app
 
-echo === Building Scrcpy Companion ===
+echo === Building Scrcpy Companion (Windows CMD) ===
 
 REM Clean and create directories
 if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
@@ -14,53 +15,107 @@ mkdir "%BUILD_DIR%"
 mkdir "%BUILD_DIR%\gen"
 mkdir "%BUILD_DIR%\classes"
 mkdir "%BUILD_DIR%\dex"
+mkdir "%BUILD_DIR%\compiled_res"
+mkdir "%BUILD_DIR%\apk"
 mkdir "%BUILD_DIR%\res\values"
 mkdir "%BUILD_DIR%\res\drawable"
+mkdir "%BUILD_DIR%\res\mipmap-anydpi-v26"
 mkdir "%BUILD_DIR%\res\layout"
 
-REM Copy resources
-copy /y "%~dp0app\src\main\res\values\strings.xml" "%BUILD_DIR%\res\values\" >nul
-copy /y "%~dp0app\src\main\res\drawable\ic_tile.xml" "%BUILD_DIR%\res\drawable\" >nul
-copy /y "%~dp0app\src\main\res\layout\activity_main.xml" "%BUILD_DIR%\res\layout\" >nul
+echo [1/6] Copying resources...
 
-REM Create manifest with Activity and TileService
-echo ^<?xml version="1.0" encoding="utf-8"?^>^<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.genymobile.scrcpy.companion"^>^<uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/^>^<uses-permission android:name="android.permission.INTERNET" /^>^<uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" /^>^<application android:label="@string/app_name" android:icon="@drawable/ic_tile"^>^<activity android:name=".MainActivity" android:label="@string/app_name" android:exported="true"^>^<intent-filter^>^<action android:name="android.intent.action.MAIN" /^>^<category android:name="android.intent.category.LAUNCHER" /^>^</intent-filter^>^</activity^>^<service android:name=".ScrcpyTileService" android:label="@string/tile_label" android:icon="@drawable/ic_tile" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true"^>^<intent-filter^>^<action android:name="android.service.quicksettings.action.QS_TILE" /^>^</intent-filter^>^</service^>^</application^>^</manifest^> > "%BUILD_DIR%\AndroidManifest.xml"
+REM Copy all resources from source directory using xcopy
+xcopy /s /e /y /q "%APP_DIR%\src\main\res\*" "%BUILD_DIR%\res\" >nul 2>&1
 
-echo [1/5] Resources created
+REM Ensure minimum resources exist if xcopy failed
+if not exist "%BUILD_DIR%\res\values\strings.xml" (
+    echo ^<?xml version="1.0" encoding="utf-8"?^>^<resources^>^<string name="app_name"^>Scrcpy Companion^</string^>^<string name="tile_label"^>Scrcpy^</string^>^</resources^> > "%BUILD_DIR%\res\values\strings.xml"
+)
 
-REM Package resources
-"%BUILD_TOOLS%\aapt.exe" package -f -m -J "%BUILD_DIR%\gen" -S "%BUILD_DIR%\res" -M "%BUILD_DIR%\AndroidManifest.xml" -I "%PLATFORM%\android.jar"
+echo [2/6] Compiling resources with aapt2...
+
+REM Use --dir to compile entire resource directory
+"%BUILD_TOOLS%\aapt2.exe" compile --dir "%BUILD_DIR%\res" -o "%BUILD_DIR%\compiled_res\compiled.zip"
 if errorlevel 1 goto error
-echo [2/5] Resources packaged
 
-REM Compile Java
+echo [3/6] Linking resources...
+
+REM Copy AndroidManifest.xml from source
+if exist "%APP_DIR%\src\main\AndroidManifest.xml" (
+    copy /y "%APP_DIR%\src\main\AndroidManifest.xml" "%BUILD_DIR%\AndroidManifest.xml" >nul
+) else (
+    echo ERROR: AndroidManifest.xml not found
+    goto error
+)
+
+"%BUILD_TOOLS%\aapt2.exe" link -o "%BUILD_DIR%\apk\base.apk" --manifest "%BUILD_DIR%\AndroidManifest.xml" -I "%PLATFORM%\android.jar" --java "%BUILD_DIR%\gen" --auto-add-overlay --min-sdk-version 21 --target-sdk-version 34 "%BUILD_DIR%\compiled_res\compiled.zip"
+if errorlevel 1 goto error
+
+echo [4/6] Compiling Java...
+
+REM Create source directory and copy Java files
 if not exist "%BUILD_DIR%\src\com\genymobile\scrcpy\companion" mkdir "%BUILD_DIR%\src\com\genymobile\scrcpy\companion"
-copy /y "%~dp0app\src\main\java\com\genymobile\scrcpy\companion\*.java" "%BUILD_DIR%\src\com\genymobile\scrcpy\companion\" >nul
+copy /y "%APP_DIR%\src\main\java\com\genymobile\scrcpy\companion\*.java" "%BUILD_DIR%\src\com\genymobile\scrcpy\companion\" >nul 2>&1
 
-javac -encoding UTF-8 -bootclasspath "%PLATFORM%\android.jar" -cp "%BUILD_TOOLS%\core-lambda-stubs.jar" -source 1.8 -target 1.8 -d "%BUILD_DIR%\classes" "%BUILD_DIR%\src\com\genymobile\scrcpy\companion\MainActivity.java" "%BUILD_DIR%\src\com\genymobile\scrcpy\companion\ScrcpyTileService.java" "%BUILD_DIR%\src\com\genymobile\scrcpy\companion\UdpClient.java" "%BUILD_DIR%\gen\com\genymobile\scrcpy\companion\R.java" 2>nul
+REM Find Java files and compile
+set JAVA_FILES=
+for %%f in ("%BUILD_DIR%\src\com\genymobile\scrcpy\companion\*.java") do (
+    set JAVA_FILES=!JAVA_FILES! "%%f"
+)
+set JAVA_FILES=%JAVA_FILES% "%BUILD_DIR%\gen\com\genymobile\scrcpy\companion\R.java"
+
+javac -encoding UTF-8 -bootclasspath "%PLATFORM%\android.jar" -source 1.8 -target 1.8 -d "%BUILD_DIR%\classes" %JAVA_FILES% 2>nul
 if errorlevel 1 goto error
-echo [3/5] Java compiled
 
-REM Create DEX (use jar to collect all class files, then d8)
+echo [5/6] Creating DEX...
+
 pushd "%BUILD_DIR%\classes"
 jar cf "%BUILD_DIR%\classes.jar" com
 popd
-call "%BUILD_TOOLS%\d8.bat" --output "%BUILD_DIR%\dex" --lib "%PLATFORM%\android.jar" --min-api 24 "%BUILD_DIR%\classes.jar" 2>nul
-if errorlevel 1 goto error
-echo [4/5] DEX created
 
-REM Create APK
-"%BUILD_TOOLS%\aapt.exe" package -f -F "%BUILD_DIR%\companion-unsigned.apk" -S "%BUILD_DIR%\res" -M "%BUILD_DIR%\AndroidManifest.xml" -I "%PLATFORM%\android.jar"
-pushd "%BUILD_DIR%\dex"
-"%BUILD_TOOLS%\aapt.exe" add "%BUILD_DIR%\companion-unsigned.apk" classes.dex >nul
-popd
-
-REM Align and sign with v2
-"%BUILD_TOOLS%\zipalign.exe" -f 4 "%BUILD_DIR%\companion-unsigned.apk" "%BUILD_DIR%\companion-aligned.apk"
-call "%BUILD_TOOLS%\apksigner.bat" sign --ks "%USERPROFILE%\.android\debug.keystore" --ks-pass pass:android --v2-signing-enabled true --v3-signing-enabled true --out "%~dp0scrcpy-companion.apk" "%BUILD_DIR%\companion-aligned.apk"
+call "%BUILD_TOOLS%\d8.bat" --output "%BUILD_DIR%\dex" --lib "%PLATFORM%\android.jar" "%BUILD_DIR%\classes.jar" 2>nul
 if errorlevel 1 goto error
 
-echo [5/5] APK created
+echo [6/6] Creating and signing APK...
+
+cd "%BUILD_DIR%\apk"
+copy /y "..\dex\classes.dex" . >nul
+
+REM Add classes.dex to base.apk using aapt
+"%BUILD_TOOLS%\aapt.exe" add "%BUILD_DIR%\apk\base.apk" classes.dex >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Failed to add classes.dex to APK
+    goto error
+)
+
+"%BUILD_TOOLS%\zipalign.exe" -f 4 "%BUILD_DIR%\apk\base.apk" "%BUILD_DIR%\companion-aligned.apk"
+
+REM Sign with debug keystore
+if exist "%USERPROFILE%\.android\debug.keystore" (
+    echo Signing with debug keystore...
+    call "%BUILD_TOOLS%\apksigner.bat" sign --ks "%USERPROFILE%\.android\debug.keystore" --ks-pass pass:android --out "%~dp0scrcpy-companion.apk" "%BUILD_DIR%\companion-aligned.apk"
+    if errorlevel 1 (
+        echo [ERROR] Failed to sign with debug keystore
+        goto error
+    )
+    echo [OK] Signed with debug keystore
+) else (
+    echo Debug keystore not found, creating one...
+    keytool -genkey -v -keystore "%BUILD_DIR%\debug.keystore" -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+    if errorlevel 1 (
+        echo [ERROR] Failed to create debug keystore
+        goto error
+    )
+    echo Signing with new keystore...
+    call "%BUILD_TOOLS%\apksigner.bat" sign --ks "%BUILD_DIR%\debug.keystore" --ks-pass pass:android --key-pass pass:android --out "%~dp0scrcpy-companion.apk" "%BUILD_DIR%\companion-aligned.apk"
+    if errorlevel 1 (
+        echo [ERROR] Failed to sign APK
+        goto error
+    )
+    echo [OK] Signed with new debug keystore
+)
+cd "%~dp0"
+
 echo.
 echo === BUILD SUCCESSFUL ===
 echo Output: %~dp0scrcpy-companion.apk

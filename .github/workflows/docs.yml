@@ -1,0 +1,123 @@
+name: Documentation Check
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'docs/**'
+      - 'scrcpy_py_ddlx/**'
+      - 'scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'scrcpy_py_ddlx/**'
+      - 'scripts/**'
+
+jobs:
+  check-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install markdown-link-check mdformat mkdocs mkdocs-material
+
+      - name: Check broken links
+        run: |
+          # 安装 markdown-link-check
+          npm install -g markdown-link-check
+
+          # 查找所有 Markdown 文件
+          find docs/ -name "*.md" -type f | while read file; do
+            echo "Checking links in: $file"
+            markdown-link-check $file --config .markdown-link-check.json
+          done
+
+      - name: Check formatting
+        run: |
+          # 检查 Markdown 格式
+          mdformat docs/
+
+      - name: Generate API docs (dry run)
+        run: |
+          # 检查 API 文档生成脚本
+          python scripts/generate_api_docs.py --dry-run
+
+      - name: Commit formatting changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/
+          git diff --staged --quiet || git commit -m "docs: format markdown files" -m "Auto-format markdown files with mdformat"
+          git push
+
+      - name: Upload formatting changes
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: formatting-changes
+          path: docs/
+
+  build-docs:
+    needs: check-docs
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mkdocs mkdocs-material mkdocs-gen-files mkdocstrings
+
+      - name: Build documentation
+        run: |
+          mkdocs build --site-dir site
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+
+  api-docs:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Generate API documentation
+        run: |
+          python scripts/generate_api_docs.py
+
+      - name: Commit API docs
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add api-docs/
+          git diff --staged --quiet || git commit -m "docs: update API documentation" -m "Auto-generated API documentation"
+          git push

@@ -377,10 +377,15 @@ def preview_window_process(frame_queue: mp.Queue,
         ready_event: Event to signal when preview window is ready
         notifier_handle: Handle for event-driven notifications (socket or event name)
     """
+    # 禁用 Qt 警告消息（在控制台不显示）
+    import os
+    os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false'
+
     # Configure logging for this process - 使用统一的日志配置模块
     from scrcpy_py_ddlx.core.logging_config import setup_logging, get_cache_dir
 
-    log_file = setup_logging(prefix="preview", cleanup=True)
+    # 静默控制台模式，所有日志只写入文件
+    log_file = setup_logging(prefix="mcp_server/preview", cleanup=True, quiet_console=True)
     logger = logging.getLogger(__name__)
     logger.info(f"Preview process logging to: {log_file}")
     logger.info(f"Log directory: {get_cache_dir() / 'logs'}")

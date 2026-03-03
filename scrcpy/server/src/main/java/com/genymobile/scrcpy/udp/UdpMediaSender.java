@@ -68,8 +68,10 @@ public class UdpMediaSender {
         if (keyFrame) flags |= FLAG_KEY_FRAME;
         if (config) flags |= FLAG_CONFIG;
 
-        // Debug log
-        Ln.d("UDP sendPacket: size=" + dataSize + ", ts=" + timestamp + ", config=" + config + ", keyFrame=" + keyFrame);
+        // Debug log (VERBOSE to avoid overhead in production)
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("UDP sendPacket: size=" + dataSize + ", ts=" + timestamp + ", config=" + config + ", keyFrame=" + keyFrame);
+        }
 
         if (dataSize == 0) {
             Ln.w("Skipping empty UDP packet");
@@ -103,18 +105,20 @@ public class UdpMediaSender {
         byte[] packetData = packet.array();
 
         // Debug: Log packet details for first few packets
-        if (sequence <= 5) {
+        if (sequence <= 5 && Ln.isEnabled(Ln.Level.VERBOSE)) {
             StringBuilder hex = new StringBuilder();
             for (int i = 0; i < Math.min(32, packetSize); i++) {
                 hex.append(String.format("%02x", packetData[i]));
             }
-            Ln.d("UDP packet #" + (sequence-1) + ": size=" + packetSize + ", ts=" + timestamp +
+            Ln.v("UDP packet #" + (sequence-1) + ": size=" + packetSize + ", ts=" + timestamp +
                  ", flags=" + String.format("0x%x", flags) + ", send_ns=" + sendTimeNs + ", hex=" + hex.toString());
         }
 
         DatagramPacket dp = new DatagramPacket(packetData, packetSize, clientAddress, clientPort);
         socket.send(dp);
-        Ln.d("UDP sent: " + packetSize + " bytes to " + clientAddress.getHostAddress() + ":" + clientPort);
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("UDP sent: " + packetSize + " bytes to " + clientAddress.getHostAddress() + ":" + clientPort);
+        }
     }
 
     private void sendFragmented(ByteBuffer data, long timestamp, long flags) throws IOException {
@@ -207,7 +211,9 @@ public class UdpMediaSender {
         byte[] packetData = packet.array();
         DatagramPacket dp = new DatagramPacket(packetData, packetSize, clientAddress, clientPort);
         socket.send(dp);
-        Ln.d("FEC data sent: " + packetSize + " bytes, keyFrame=" + keyFrame);
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("FEC data sent: " + packetSize + " bytes, keyFrame=" + keyFrame);
+        }
     }
 
     /**
@@ -250,7 +256,9 @@ public class UdpMediaSender {
         DatagramPacket dp = new DatagramPacket(packetData, packet.remaining(), clientAddress, clientPort);
         socket.send(dp);
 
-        Ln.d("FEC parity sent: " + dataSize + " bytes");
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("FEC parity sent: " + dataSize + " bytes");
+        }
     }
 
     /**
@@ -265,7 +273,9 @@ public class UdpMediaSender {
         int fragmentIndex = 0;
         int fragmentCount = (totalSize + maxFragmentData - 1) / maxFragmentData;
 
-        Ln.d("FEC parity fragmenting: total=" + totalSize + " bytes into " + fragmentCount + " fragments");
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("FEC parity fragmenting: total=" + totalSize + " bytes into " + fragmentCount + " fragments");
+        }
 
         while (fecParity.hasRemaining()) {
             int chunkSize = Math.min(fecParity.remaining(), maxFragmentData);
@@ -292,7 +302,9 @@ public class UdpMediaSender {
             fragmentIndex++;
         }
 
-        Ln.d("FEC parity fragments sent: " + fragmentIndex + " fragments");
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("FEC parity fragments sent: " + fragmentIndex + " fragments");
+        }
     }
 
     /**
@@ -385,7 +397,9 @@ public class UdpMediaSender {
             for (ByteBuffer parity : parityPackets) {
                 sendFecParityPacket(parity, lastTimestamp);
             }
-            Ln.d("FEC finalized: sent " + parityPackets.size() + " parity packets");
+            if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+                Ln.v("FEC finalized: sent " + parityPackets.size() + " parity packets");
+            }
         }
     }
 
@@ -411,6 +425,8 @@ public class UdpMediaSender {
         byte[] packetData = packet.array();
         DatagramPacket dp = new DatagramPacket(packetData, packetSize, clientAddress, clientPort);
         socket.send(dp);
-        Ln.d("FEC data fragment sent: " + packetSize + " bytes, frag_idx=" + fragmentIndex);
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("FEC data fragment sent: " + packetSize + " bytes, frag_idx=" + fragmentIndex);
+        }
     }
 }

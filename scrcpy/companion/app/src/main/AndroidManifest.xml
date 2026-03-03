@@ -4,6 +4,8 @@
 
     <!-- Required for Quick Settings Tile -->
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
+    <!-- Required for UDP socket communication -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"
@@ -11,6 +13,17 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- Main Activity (Launcher Entry) -->
+        <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!-- Quick Settings Tile Service -->
         <service

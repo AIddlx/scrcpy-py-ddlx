@@ -443,7 +443,7 @@ class ScrcpyMCPConfigDialog(QWidget):
         # Create ClientConfig and test connection
         client_config = ClientConfig(
             max_fps=60,  # 高帧率
-            bitrate=8000000,  # 8 Mbps 高码率
+            bitrate=3000000,  # 3 Mbps
             show_window=config["show_window"],
             control=config["control"],
             audio=config["audio"],
@@ -666,7 +666,7 @@ class ScrcpyMCPMainWindow(QMainWindow):
 
         client_config = ClientConfig(
             max_fps=60,  # 高帧率保证流畅度
-            bitrate=8000000,  # 8 Mbps 高码率保证画质
+            bitrate=3000000,  # 3 Mbps保证画质
             show_window=True,  # ✅ 让 client 创建自己的 window（保证回调链完整）
             control=config["control"],
             audio=config["audio"],
@@ -735,7 +735,7 @@ class ScrcpyMCPMainWindow(QMainWindow):
         # Use default config for quick connect
         client_config = ClientConfig(
             max_fps=60,  # 高帧率
-            bitrate=8000000,  # 8 Mbps 高码率
+            bitrate=3000000,  # 3 Mbps
             show_window=False,
             control=True,
             audio=False,

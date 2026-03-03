@@ -23,7 +23,7 @@ import java.util.Locale;
 
 public class Options {
 
-    private Ln.Level logLevel = Ln.Level.DEBUG;
+    private Ln.Level logLevel = Ln.Level.INFO;  // Default to INFO to reduce logging overhead
     private int scid = -1; // 31-bit non-negative value, or -1
     private boolean video = true;
     private boolean audio = true;
@@ -33,7 +33,7 @@ public class Options {
     private VideoSource videoSource = VideoSource.DISPLAY;
     private AudioSource audioSource = AudioSource.OUTPUT;
     private boolean audioDup;
-    private int videoBitRate = 8000000;
+    private int videoBitRate = 3000000;
     private int audioBitRate = 128000;
     private float maxFps;
     private float angle;

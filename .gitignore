@@ -112,3 +112,9 @@ nul
 
 # Auth keys (local only)
 .auth/
+*.dex
+
+# Manual build output
+build_manual/
+*.idsig
+.claude/

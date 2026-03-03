@@ -251,8 +251,8 @@ Server Lifecycle Modes:
                            help='Video codec: auto (default, select best available), h264, h265, av1')
     video_group.add_argument('--list-encoders', dest='list_encoders', action='store_true',
                            help='List device encoders and exit')
-    video_group.add_argument('--bitrate', dest='video_bitrate', type=int, default=2500000,
-                           help='Video bitrate in bps (default: 2.5 Mbps)')
+    video_group.add_argument('--bitrate', dest='video_bitrate', type=int, default=3000000,
+                           help='Video bitrate in bps (default: 3 Mbps)')
     video_group.add_argument('--max-fps', dest='max_fps', type=int, default=60,
                            help='Max frame rate (default: 60)')
     video_group.add_argument('--cbr', dest='bitrate_mode', action='store_const', const='cbr',
@@ -685,8 +685,11 @@ def start_server(args, device_serial: str = None):
     if args.auth_enabled and auth_key:
         server_cmd += "auth_key_file=/data/local/tmp/scrcpy-auth.key "
 
+    # cleanup: true = server exits when client disconnects (default)
+    #          false = server keeps running for reconnection (--stay-alive mode)
+    cleanup_flag = "false" if args.stay_alive else "true"
     server_cmd += (
-        f"video=true {audio_params} control=true send_device_meta=true send_dummy_byte=true cleanup=false"
+        f"video=true {audio_params} control=true send_device_meta=true send_dummy_byte=true cleanup={cleanup_flag}"
     )
 
     # Wrap with nohup and setsid to survive ADB disconnection
@@ -1124,6 +1127,21 @@ def run_client(args, device_serial: str = None, log_filename: str = None):
             client.disconnect()
         except:
             pass
+
+        # Kill server if not in stay_alive mode and ADB is available
+        if not args.stay_alive:
+            try:
+                check_result = subprocess.run(
+                    ['adb', 'devices'],
+                    capture_output=True, text=True, timeout=5
+                )
+                has_device = 'device' in check_result.stdout and '\tdevice' in check_result.stdout
+                if has_device:
+                    print("[INFO] Stopping server on device...")
+                    subprocess.run(["adb", "shell", "pkill -f app_process"],
+                                  capture_output=True, timeout=5)
+            except Exception:
+                pass  # Ignore errors during cleanup
 
         # Save server log (from device) - only if ADB is available
         if log_filename:

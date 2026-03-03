@@ -1,20 +1,24 @@
 # scrcpy-py-ddlx dependencies
+# All three entry scripts share these
 
-# Core
-av
-numpy
+# ===== Core (required) =====
+av==16.1.0
+numpy==2.2.4
 
-# GUI
-PySide6
-PyOpenGL
-PyOpenGL_accelerate
+# ===== GUI =====
+PySide6==6.10.1
 
-# Audio
-sounddevice
+# ===== GPU Rendering =====
+PyOpenGL==3.1.10
+PyOpenGL_accelerate==3.1.10
 
-# HTTP MCP server
-starlette
-uvicorn[standard]
+# ===== Audio Playback =====
+sounddevice==0.5.3
 
-# MCP
-mcp
+# ===== HTTP MCP Server =====
+starlette==0.50.0
+uvicorn==0.40.0
+
+# ===== Clipboard Sync =====
+pywin32==311; sys_platform == 'win32'
+pyperclip==1.11.0

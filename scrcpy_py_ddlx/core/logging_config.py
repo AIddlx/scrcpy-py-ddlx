@@ -554,7 +554,21 @@ def get_log_file_path(prefix: str = "session") -> Path:
     获取新的日志文件路径（不设置 logging）。
 
     用于子进程只需要日志文件路径的情况。
+
+    Args:
+        prefix: 日志文件前缀，支持子目录格式（如 "mcp_server/session"）
     """
     log_dir = get_log_dir()
+
+    # 支持 prefix 中包含子目录
+    prefix_path = Path(prefix.replace("\\", "/"))
+    if "/" in prefix:
+        subdir = prefix_path.parent
+        file_prefix = prefix_path.name
+        log_dir = log_dir / subdir
+        log_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        file_prefix = prefix
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    return log_dir / f"{prefix}_{timestamp}.log"
+    return log_dir / f"{file_prefix}_{timestamp}.log"

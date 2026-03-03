@@ -259,7 +259,7 @@ def main():
         audio=True,  # 启用音频
         audio_dup=False,  # 设为 True 可同时播放到手机和电脑
         clipboard_autosync=True,  # 启用剪贴板自动同步（PC ↔ 设备）
-        bitrate=2500000,  # 2.5 Mbps
+        bitrate=3000000,  # 3 Mbps
         max_fps=30,  # 30fps
     )
 

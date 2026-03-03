@@ -1001,7 +1001,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         // Immediately reply with PONG, echoing back the timestamp
         DeviceMessage pong = DeviceMessage.createPong(timestamp);
         sender.send(pong);
-        Ln.d("Heartbeat: PING received, PONG sent (timestamp=" + timestamp + ")");
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("Heartbeat: PING received, PONG sent (timestamp=" + timestamp + ")");
+        }
     }
 
     // File channel handling

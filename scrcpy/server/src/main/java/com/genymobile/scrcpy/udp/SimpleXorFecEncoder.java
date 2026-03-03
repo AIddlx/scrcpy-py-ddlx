@@ -141,7 +141,9 @@ public class SimpleXorFecEncoder {
             }
         }
 
-        Ln.d("FEC generateParity: groupId=" + currentGroupId + ", frames=" + framesInGroup + ", maxSize=" + maxSize);
+        if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+            Ln.v("FEC generateParity: groupId=" + currentGroupId + ", frames=" + framesInGroup + ", maxSize=" + maxSize);
+        }
 
         // Generate parity by XOR-ing all frame data
         byte[] parity = new byte[maxSize];

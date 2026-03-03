@@ -50,12 +50,27 @@ python tests_gui/test_direct.py
 
 ---
 
+## 预编译产物
+
+本项目提供预编译文件，**无需自行编译**即可使用：
+
+| 文件 | 大小 | 说明 |
+|------|------|------|
+| `scrcpy-server` | ~120KB | Android 服务端，运行时自动推送到设备 |
+| `scrcpy/companion/scrcpy-companion.apk` | ~25KB | 快捷开关应用（可选，用于通知栏快捷控制） |
+
+如需自行编译服务端，请参考：[安装指南](documentation/user/installation.md)
+
+---
+
 ## 使用模式
 
 | 模式 | 命令 | 说明 |
 |------|------|------|
 | **Python API** | `from scrcpy_py_ddlx import ScrcpyClient` | 作为 Python 库使用 |
-| **HTTP MCP** | `python scrcpy_http_mcp_server.py --audio` | HTTP MCP 服务器 |
+| **HTTP MCP** | `python scrcpy_http_mcp_server.py` | HTTP MCP 服务器 |
+| **网络模式** | `python scrcpy_http_mcp_server.py --net --stay-alive` | TCP/UDP 直连 + 驻留服务端 |
+| **终止驻留** | `python scrcpy_http_mcp_server.py --stop-server <IP>` | 通过 UDP 终止驻留服务端 |
 | **Direct Test** | `python tests_gui/test_direct.py` | 快速测试（带视频窗口） |
 
 ---

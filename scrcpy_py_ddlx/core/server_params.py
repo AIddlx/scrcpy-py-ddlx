@@ -294,7 +294,7 @@ def validate_scid_format(scid_param: str) -> bool:
 
 
 # Convenience functions for common scenarios
-def create_video_only_params(scid: int, max_size: int = 1920, bitrate: int = 8000000) -> List[str]:
+def create_video_only_params(scid: int, max_size: int = 1920, bitrate: int = 3000000) -> List[str]:
     """Create parameters for video-only streaming"""
     options = ServerOptions(
         scid=scid,
@@ -310,7 +310,7 @@ def create_video_only_params(scid: int, max_size: int = 1920, bitrate: int = 800
 def create_full_params(
     scid: int,
     max_size: int = 1920,
-    video_bitrate: int = 8000000,
+    video_bitrate: int = 3000000,
     audio_bitrate: int = 128000
 ) -> List[str]:
     """Create parameters for full video+audio+control streaming"""

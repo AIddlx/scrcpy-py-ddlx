@@ -192,12 +192,9 @@ class PyAVDecoder(AudioCodecBase):
 
     def reset(self) -> None:
         """Reset decoder state."""
-        if self._codec_context is not None:
-            try:
-                self._codec_context.close()
-            except Exception as e:
-                logger.debug(f"Error closing codec context: {e}")
-
+        # PyAV CodecContext uses __dealloc__ for cleanup, no close() method
+        # Just let Python's garbage collector handle the old context
+        self._codec_context = None
         self._stream_analyzed = False
         self._actual_sample_rate = None
         self._actual_channels = None

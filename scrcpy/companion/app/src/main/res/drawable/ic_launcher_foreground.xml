@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scrcpy companion app launcher icon foreground - phone with cast indicator -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Phone outline (centered in 72dp safe area) -->
+    <path
+        android:fillColor="#2196F3"
+        android:pathData="M66,18H42c-3.31,0 -6,2.69 -6,6v60c0,3.31 2.69,6 6,6h24c3.31,0 6,-2.69 6,-6V24C72,20.69 69.31,18 66,18zM66,78H42V30h24V78z"/>
+
+    <!-- Play/Cast indicator (arrow pointing up) -->
+    <path
+        android:fillColor="#2196F3"
+        android:pathData="M54,42l-8,8h6v12h4V50h6L54,42z"/>
+
+</vector>

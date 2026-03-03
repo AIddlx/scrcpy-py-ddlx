@@ -186,7 +186,7 @@ TOOLS = [
                     "default": "auto",
                     "description": "Video codec: auto (detect), h264, h265, or av1"
                 },
-                "bitrate": {"type": "integer", "default": 8000000, "description": "Video bitrate in bps (default: 8 Mbps)"},
+                "bitrate": {"type": "integer", "default": 3000000, "description": "Video bitrate in bps (default: 3 Mbps)"},
                 "max_fps": {"type": "integer", "default": 60, "description": "Max frame rate (30, 60, 90, 120)"},
                 "bitrate_mode": {
                     "type": "string",
@@ -317,7 +317,7 @@ TOOLS = [
                     "default": "auto",
                     "description": "Video codec: auto (detect best), h264 (compatible), h265 (efficient), av1 (newest)"
                 },
-                "video_bitrate": {"type": "integer", "default": 8000000, "description": "Video bitrate in bps (default: 8 Mbps)"},
+                "video_bitrate": {"type": "integer", "default": 3000000, "description": "Video bitrate in bps (default: 3 Mbps)"},
                 "max_fps": {"type": "integer", "default": 60, "description": "Max frame rate (30, 60, 90, 120)"},
                 "bitrate_mode": {
                     "type": "string",
@@ -349,7 +349,7 @@ TOOLS = [
                 "audio": {"type": "boolean", "default": False, "description": "Enable audio (for recording)"},
                 "audio_dup": {"type": "boolean", "default": False, "description": "Duplicate audio: play on both device and computer (Android 11+)"},
                 "video_codec": {"type": "string", "enum": ["auto", "h264", "h265", "av1"], "default": "auto"},
-                "video_bitrate": {"type": "integer", "default": 8000000},
+                "video_bitrate": {"type": "integer", "default": 3000000},
                 "max_fps": {"type": "integer", "default": 60},
                 "auto_connect": {"type": "boolean", "default": False, "description": "Auto connect via network after push (one-step flow)"},
                 "stay_alive": {"type": "boolean", "default": False, "description": "Server persists after ADB disconnect (use setsid)"},
@@ -368,7 +368,7 @@ TOOLS = [
                 "audio": {"type": "boolean", "default": False, "description": "Enable audio (for recording)"},
                 "audio_dup": {"type": "boolean", "default": False, "description": "Duplicate audio: play on both device and computer (Android 11+)"},
                 "video_codec": {"type": "string", "enum": ["auto", "h264", "h265", "av1"], "default": "auto"},
-                "video_bitrate": {"type": "integer", "default": 8000000},
+                "video_bitrate": {"type": "integer", "default": 3000000},
                 "max_fps": {"type": "integer", "default": 60},
                 "max_connections": {"type": "integer", "default": -1, "description": "Max connections before exit (-1 = unlimited)"},
                 "fec_enabled": {"type": "boolean", "default": False, "description": "Enable FEC for unstable networks"},
@@ -1719,7 +1719,7 @@ class ScrcpyMCPHandler:
         # Debug: log parameter values
         logger.info(f"[CONNECT] Parameters: video={video}, audio={audio}, connection_mode={connection_mode}")
         codec = kwargs.get('codec', 'auto')
-        bitrate = kwargs.get('bitrate', 8000000)
+        bitrate = kwargs.get('bitrate', 3000000)
         max_fps = kwargs.get('max_fps', 60)
         bitrate_mode = kwargs.get('bitrate_mode', 'vbr')
         i_frame_interval = kwargs.get('i_frame_interval', 10.0)
@@ -2377,7 +2377,7 @@ class ScrcpyMCPHandler:
                         # 视频参数
                         video_enabled = arguments.get("video", True)  # 默认开启（兼容旧版）
                         video_codec = arguments.get("video_codec", "auto")
-                        video_bitrate = arguments.get("video_bitrate", 8000000)
+                        video_bitrate = arguments.get("video_bitrate", 3000000)
                         max_fps = arguments.get("max_fps", 60)
                         bitrate_mode = arguments.get("bitrate_mode", "vbr")
                         i_frame_interval = arguments.get("i_frame_interval", 10.0)
@@ -3378,9 +3378,10 @@ _enable_video = True
 _stay_alive = False  # Server persists after ADB disconnect
 _force_push = False  # Force push new server (stop old first)
 _stop_server_only = False  # Only stop server, don't connect
+_stop_server_ip = None  # IP address to send terminate request
 
 # Video quality settings
-_video_bitrate = 8000000
+_video_bitrate = 3000000
 _video_fps = 60
 _video_codec = "auto"
 
@@ -3508,6 +3509,193 @@ def _exit_on_failure(reason: str, exit_code: int = 1):
     os._exit(exit_code)
 
 
+async def _stop_server_only_async():
+    """--stop-server 模式的处理逻辑：通过 UDP 协议停止驻留服务端并退出。"""
+    import socket
+    from datetime import datetime
+
+    DISCOVERY_PORT = 27183
+    DISCOVER_REQUEST = b"SCRCPY_DISCOVER"
+    DISCOVER_RESPONSE_PREFIX = "SCRCPY_HERE"
+    TERMINATE_REQUEST = b"SCRCPY_TERMINATE"
+    TERMINATE_RESPONSE = "SCRCPY_TERMINATE_ACK"
+
+    def ptime():
+        return datetime.now().strftime('%H:%M:%S')
+
+    def print_step(step_name):
+        """打印步骤开始"""
+        print(f"[{ptime()}] → {step_name}...")
+
+    def print_detail(detail):
+        """打印详细信息（缩进）"""
+        print(f"            {detail}")
+
+    def print_success():
+        """打印步骤成功"""
+        print("[OK]")
+
+    def print_failure():
+        """打印步骤失败"""
+        print("[FAIL]")
+
+    def udp_discover(timeout: float = 2.0) -> tuple[bool, str, str]:
+        """通过 UDP 广播发现驻留服务端。返回 (成功, IP, 设备名)"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.settimeout(timeout)
+
+            # 发送广播
+            broadcast_addr = "255.255.255.255"
+            sock.sendto(DISCOVER_REQUEST, (broadcast_addr, DISCOVERY_PORT))
+            logger.info(f"[STOP_SERVER] Sent discover broadcast to {broadcast_addr}:{DISCOVERY_PORT}")
+
+            data, addr = sock.recvfrom(256)
+            response = data.decode().strip()
+            sock.close()
+
+            if response.startswith(DISCOVER_RESPONSE_PREFIX):
+                # 解析响应: "SCRCPY_HERE DeviceName IP mode"
+                parts = response.split(" ")
+                device_name = parts[1] if len(parts) > 1 else "Unknown"
+                device_ip = parts[2] if len(parts) > 2 else addr[0]
+                logger.info(f"[STOP_SERVER] Discovered: {device_name} @ {device_ip}")
+                return True, device_ip, device_name
+            else:
+                return False, "", ""
+        except socket.timeout:
+            return False, "", ""
+        except OSError as e:
+            # Windows 上广播可能失败，尝试使用本机广播地址
+            if "errno 11001" in str(e).lower() or "permission" in str(e).lower():
+                logger.debug(f"[STOP_SERVER] Broadcast failed, trying subnet broadcast...")
+                try:
+                    sock2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock2.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                    sock2.settimeout(timeout)
+                    # 获取本机广播地址
+                    subnet_broadcast = "192.168.255.255"
+                    sock2.sendto(DISCOVER_REQUEST, (subnet_broadcast, DISCOVERY_PORT))
+                    logger.info(f"[STOP_SERVER] Sent discover to subnet {subnet_broadcast}:{DISCOVERY_PORT}")
+                    data2, addr2 = sock2.recvfrom(256)
+                    response2 = data2.decode().strip()
+                    sock2.close()
+
+                    if response2.startswith(DISCOVER_RESPONSE_PREFIX):
+                        parts = response2.split(" ")
+                        device_name = parts[1] if len(parts) > 1 else "Unknown"
+                        device_ip = parts[2] if len(parts) > 2 else addr[0]
+                        logger.info(f"[STOP_SERVER] Discovered via subnet: {device_name} @ {device_ip}")
+                        return True, device_ip, device_name
+                except Exception as e2:
+                    logger.debug(f"[STOP_SERVER] Subnet broadcast also failed: {e2}")
+                    return False, "", ""
+            return False, "", ""
+        except Exception as e:
+            logger.debug(f"[STOP_SERVER] Discovery failed: {e}")
+            return False, "", ""
+
+    def send_udp_terminate(host: str, timeout: float = 2.0) -> tuple[bool, str]:
+        """发送 UDP 终止请求到指定主机。"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            sock.sendto(TERMINATE_REQUEST, (host, DISCOVERY_PORT))
+            logger.info(f"[STOP_SERVER] Sent terminate request to {host}:{DISCOVERY_PORT}")
+
+            data, _ = sock.recvfrom(256)
+            response = data.decode().strip()
+            sock.close()
+
+            if response == TERMINATE_RESPONSE:
+                return True, "服务端已确认终止"
+            else:
+                return False, f"意外响应: {response}"
+        except socket.timeout:
+            return False, "无响应（超时）"
+        except Exception as e:
+            return False, f"错误: {e}"
+
+    logger.info("[MODE] Stop server only mode")
+
+    # 确定目标 IP
+    target_ip = _stop_server_ip
+    device_name = None
+
+    if target_ip == "auto" or target_ip is None:
+        # 自动发现模式：优先 USB，其次网络广播
+        print_step("检测 USB 设备")
+        list_result = await _execute_tool("list_devices", {})
+        devices = list_result.get("devices", [])
+
+        if devices:
+            device = devices[0]
+            device_id = device.get("id") or device.get("serial")
+            device_name = device.get("name", device_id)
+            print(f"{device_name} ({device_id})")
+            print_success()
+
+            # 获取设备 IP
+            print_step("获取设备 IP")
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["adb", "-s", device_id, "shell", "ip route | awk '/src/ {print $9}'"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    target_ip = result.stdout.strip().split('\n')[0].strip()
+                    if target_ip:
+                        print(f"{target_ip}")
+                        print_success()
+                    else:
+                        print_failure()
+                        print("无法获取设备 IP，尝试网络发现...")
+                        target_ip = None
+                else:
+                    print_failure()
+                    print("获取设备 IP 失败，尝试网络发现...")
+                    target_ip = None
+            except Exception as e:
+                print_failure()
+                print(f"获取设备 IP 出错，尝试网络发现...")
+                target_ip = None
+
+        # USB 不可用或获取 IP 失败，尝试网络发现
+        if not target_ip or target_ip == "auto":
+            print_step("网络发现驻留服务端")
+            logger.debug("尝试 UDP 广播发现...")
+            found, discovered_ip, discovered_name = udp_discover()
+            logger.debug(f"UDP discover result: found={found}, ip={discovered_ip}, name={discovered_name}")
+
+            if found:
+                device_name = discovered_name
+                target_ip = discovered_ip
+                print(f"{device_name} ({target_ip})")
+                print_success()
+            else:
+                print_failure()
+                print("未找到驻留服务端。")
+                print("提示: 磀保设备上有服务端运行，或使用 --stop-server <IP> 指定 IP")
+                sys.exit(1)
+
+    # 发送终止请求
+    print_step(f"发送终止请求到 {target_ip}")
+    success, message = send_udp_terminate(target_ip)
+
+    if success:
+        print_success()
+        print(f"驻留服务端已终止 ({message})")
+    else:
+        print_failure()
+        print(f"终止失败: {message}")
+        if "无响应" in message:
+            print("提示: 设备上可能没有运行驻留服务端")
+
+    logger.info("[STOP_SERVER] Done, exiting")
+
+
 async def on_startup():
     """Auto-connect to device on server startup (if configured)."""
     import asyncio
@@ -3559,34 +3747,6 @@ async def on_startup():
     logger.debug(f"[DEBUG] _network_push_device={_network_push_device}, _auto_connect={_auto_connect}, _stay_alive={_stay_alive}, _force_push={_force_push}")
 
     try:
-        # ========== --stop-server 模式: 仅终止驻留服务端 ==========
-        if _stop_server_only:
-            logger.info("[MODE] Stop server only mode")
-            print_step("检测 USB 设备")
-            list_result = await _execute_tool("list_devices", {})
-            devices = list_result.get("devices", [])
-
-            if not devices:
-                _exit_on_failure("No USB device found. --stop-server requires USB connection.")
-
-            device = devices[0]
-            device_id = device.get("id") or device.get("serial")
-            device_name = device.get("name", device_id)
-            print(f"{device_name} ({device_id})")
-            print_success()
-
-            print_step("终止驻留服务端")
-            stop_result = await _execute_tool("force_stop_server", {"device_id": device_id})
-            if stop_result.get("success"):
-                print_success()
-                print("驻留服务端已终止")
-            else:
-                print_detail("无驻留服务端运行")
-
-            logger.info("[STOP_SERVER] Done, exiting")
-            os._exit(0)
-            return
-
         if _network_push_device:
             logger.info("[DEBUG] 进入 _network_push_device 分支")
             # ========== Network mode ==========
@@ -3873,9 +4033,63 @@ async def on_startup():
                     _print_server_ready_func(device_ip)
                 return
 
-            # 情况4: --net (一次性模式，USB 推送非驻留服务端)
-            # Step 1: 检测 USB 设备
-            print_step("检测设备")
+            # 情况4: --net (一次性模式)
+            # 先尝试 UDP Discovery 检测驻留服务端（可能已通过 --stay-alive 启动）
+            print_step("检测驻留服务端")
+            print_detail("UDP Discovery...")
+            device_ip = None
+            try:
+                from scrcpy_py_ddlx.client.udp_wake import discover_devices
+                discovered = discover_devices(timeout=2.0)
+                if discovered:
+                    device_ip = discovered[0]['ip']
+                    _device_name = discovered[0].get('name', 'unknown')
+                    logger.info(f"[AUTO_CONNECT] UDP discovery found: {_device_name} at {device_ip}")
+                    print_detail(f"发现驻留服务端: {_device_name} ({device_ip})")
+
+                    # 尝试连接驻留服务端
+                    print_detail(f"连接驻留服务端 ({device_ip})...")
+                    connect_params = {
+                        "connection_mode": "network",
+                        "device_id": device_ip,
+                        "video": _enable_video,
+                        "audio": DEFAULT_AUDIO_ENABLED,
+                        "audio_dup": DEFAULT_AUDIO_DUP,
+                        "wake_server": True,
+                    }
+                    connect_result = await _execute_tool("connect", connect_params)
+
+                    if connect_result.get("success"):
+                        print_success()
+                        print(f"            → 最终模式: Network (复用驻留服务端)")
+                        print(f"            → 连接方式: UDP discovery → TCP {device_ip}")
+
+                        _server_started = True
+                        _server_device_id = device_ip
+                        _server_stay_alive = True
+
+                        if connect_result.get("device_name"):
+                            _device_name = connect_result.get("device_name")
+
+                        # 启动预览窗口
+                        if _auto_preview:
+                            await asyncio.sleep(0.5)
+                            print_step("启动预览窗口")
+                            preview_result = await _execute_tool("start_preview", {})
+                            if preview_result.get("success"):
+                                print_success()
+
+                        if _print_server_ready_func:
+                            _print_server_ready_func(device_ip)
+                        return
+                    else:
+                        logger.warning(f"[AUTO_CONNECT] Failed to connect to {device_ip}: {connect_result.get('error')}")
+                        print_detail("连接失败，尝试 USB 推送...")
+            except Exception as e:
+                logger.warning(f"[AUTO_CONNECT] UDP discovery failed: {e}")
+
+            # 未发现驻留服务端或连接失败，检测 USB 推送
+            print_step("检测 USB 设备")
             list_result = await _execute_tool("list_devices", {})
             devices = list_result.get("devices", [])
 
@@ -3929,7 +4143,7 @@ async def on_startup():
             start_info = push_result.get("start", {})
             video_info = start_info.get("video", {})
             actual_codec = video_info.get("codec", "h265")
-            bitrate = video_info.get("bitrate", 8000000)
+            bitrate = video_info.get("bitrate", 3000000)
             max_fps = video_info.get("max_fps", 60)
             bitrate_mode = video_info.get("bitrate_mode", "vbr").upper()
             _video_codec_used = actual_codec
@@ -4348,8 +4562,8 @@ Quick Start Examples:
                         help="Network mode: server persists after disconnect. Auto-reuse if found, push if not.")
     parser.add_argument("--force", action="store_true", default=False,
                         help="Force push: stop old server and push new one (requires USB)")
-    parser.add_argument("--stop-server", action="store_true", default=False,
-                        help="Stop persisted server on device and exit (requires USB)")
+    parser.add_argument("--stop-server", nargs='?', const="auto", metavar="IP",
+                        help="Stop persisted server via UDP and exit. Auto-discover if IP not specified.")
 
     # ========== Logging Settings ==========
 
@@ -4385,8 +4599,8 @@ Quick Start Examples:
     parser.add_argument(
         "--bitrate", "-b",
         type=int,
-        default=8000000,
-        help="Video bitrate in bps (default: 8M = 8000000). Examples: 2M=2000000, 4M=4000000, 8M=8000000, 16M=16000000"
+        default=3000000,
+        help="Video bitrate in bps (default: 3M = 3000000). Examples: 1M=1000000, 2M=2000000, 4M=4000000, 8M=8000000"
     )
     parser.add_argument(
         "--fps",
@@ -4419,7 +4633,7 @@ Quick Start Examples:
     # 控制台静默模式（用户友好信息用 print() 输出）
     # 日志级别和保留数量由环境变量/命令行参数/默认值决定
     log_file = setup_logging(
-        prefix="session",
+        prefix="mcp_server/session",
         level=log_level,
         quiet_console=True,
         log_keep=args.log_keep
@@ -4430,7 +4644,7 @@ Quick Start Examples:
     # 保存默认音频配置到全局变量
     global DEFAULT_AUDIO_ENABLED, DEFAULT_AUDIO_DUP
     global _auto_connect, _auto_preview, _network_device, _network_push_device, _enable_video, _stay_alive
-    global _video_bitrate, _video_fps, _video_codec, _force_push, _stop_server_only
+    global _video_bitrate, _video_fps, _video_codec, _force_push, _stop_server_only, _stop_server_ip
 
     # 保存视频质量参数
     _video_bitrate = args.bitrate
@@ -4438,7 +4652,8 @@ Quick Start Examples:
     _video_codec = args.codec
     _stay_alive = args.stay_alive
     _force_push = args.force
-    _stop_server_only = args.stop_server
+    _stop_server_only = args.stop_server is not None
+    _stop_server_ip = args.stop_server
 
     # ========== 参数组合验证 ==========
     validation_errors = []
@@ -4473,7 +4688,8 @@ Quick Start Examples:
         print("║  - --net --stay-alive --force 强制推送驻留服务端          ║")
         print("║  - --net <IP>                直接TCP连接指定IP            ║")
         print("║  - --adb                     USB ADB隧道模式              ║")
-        print("║  - --stop-server             仅终止驻留服务端             ║")
+        print("║  - --stop-server             终止驻留服务端(自动发现IP)   ║")
+        print("║  - --stop-server <IP>        终止驻留服务端(指定IP)       ║")
         print("╚═══════════════════════════════════════════════════════════╝")
         print("")
         sys.exit(1)
@@ -4640,6 +4856,12 @@ Quick Start Examples:
         auto_connect_thread = threading.Thread(target=run_auto_connect, daemon=True)
         auto_connect_thread.start()
         logger.info("Auto-connect thread started")
+
+    # --stop-server 模式: 直接执行停止逻辑并退出，不启动 MCP 服务器
+    if _stop_server_only:
+        import asyncio
+        asyncio.run(_stop_server_only_async())
+        return
 
     # 启动服务器 - 禁用 lifespan 以避免 Windows 上的兼容性问题
     uvicorn.run(
