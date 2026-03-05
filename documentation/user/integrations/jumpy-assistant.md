@@ -1,204 +1,212 @@
-# 阶跃桌面助手 - 添加 MCP 工具指南
+# 阶跃桌面助手 - MCP 集成指南
 
-本文档介绍如何在阶跃桌面助手中添加外部 MCP 工具（如 scrcpy-py-ddlx）。
+本文档介绍如何在阶跃桌面助手中添加 scrcpy-py-ddlx 的 MCP 工具。
 
-## 前置要求
+## 工作原理
 
-- 已安装阶跃桌面助手
-- Python 3.10+
-- Git
-
-## 准备工作
-
-### 1. 创建工作目录并克隆项目
-
-```bash
-# 创建工作目录
-mkdir ddlx
-cd ddlx
-
-# 克隆项目
-git clone https://github.com/AIddlx/scrcpy-py-ddlx.git
-cd scrcpy-py-ddlx
+```
+阶跃桌面助手 <---> HTTP MCP 服务器 <---> Android 设备
+                    (localhost:3359)
 ```
 
-### 2. 创建虚拟环境
-
-```bash
-# 在工作目录中创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-venv\Scripts\activate
-```
-
-### 3. 安装依赖
-
-```bash
-# 安装项目依赖
-pip install -r requirements.txt
-```
-
-**依赖说明：**
-- `av` - 视频/音频编解码
-- `numpy` - 数组操作
-- `PySide6` - Qt6 GUI
-- `PyOpenGL` - GPU 加速渲染
-- `sounddevice` - 音频播放
-- `starlette` / `uvicorn` - HTTP MCP 服务器
-
-### 4. 启动 MCP 服务器
-
-```bash
-# 确保虚拟环境已激活（命令行前缀显示 (venv)）
-# 启动 MCP 服务器（启用音频）
-python scrcpy_http_mcp_server.py --audio
-```
-
-服务器默认运行在 `http://localhost:3359/mcp`
-
-**保持此窗口运行**，不要关闭。
-
-## 添加步骤
-
-### 步骤 1: 显示主窗口
-
-在电脑右下角找到"小跃"图标，**右键点击** → 选择"显示主窗口"
-
-![步骤1](../image/1.png)
-
-### 步骤 2: 进入设置页面
-
-在主窗口**右上角**，**左键点击**圆形图标 → 进入设置页面
-
-![步骤2](../image/2.png)
-
-### 步骤 3: 找到工具箱
-
-在设置页面中，找到并点击"**工具箱**"选项
-
-![步骤3](../image/3.png)
-
-### 步骤 4: 添加外部工具
-
-在工具箱页面，点击"**添加外部工具**"
-
-![步骤4](../image/4.png)
-
-### 步骤 5: 配置 MCP 工具
-
-选择"**添加外部 MCP 工具**"，填写以下信息：
-
-
-
-填写完成后，点击"**确认**"或"**添加**"按钮完成 MCP 服务器添加。
-
-![步骤5](../image/5.png)
-
-### MCP 配置说明
-
-**配置参数：**
-
-| 参数 | 值 | 说明 |
-|------|---|------|
-| 名称 | `scrcpy` | 自定义名称，用于识别工具 |
-| URL | `http://127.0.0.1:3359/mcp` | MCP 服务器地址 |
-
-**注意：**
-- URL 使用 `127.0.0.1` 而非 `localhost`，确保兼容性
-- 端口号 `3359` 是 scrcpy HTTP MCP 服务器的默认端口
-- 确保启动服务器时使用了 `--audio` 参数以支持录音功能
-
-**配置文件示例（供参考）：**
-
-```json
-{
-  "mcpServers": {
-    "scrcpy": {
-      "url": "http://127.0.0.1:3359/mcp"
-    }
-  }
-}
-```
+1. 阶跃助手通过 MCP 协议连接到本地 HTTP 服务器
+2. 服务器返回可用工具列表（`tools/list`）
+3. 阶跃助手根据工具描述理解如何调用
+4. 每次工具调用，服务器实时连接/控制设备
 
 ---
 
-## 验证连接
+## 安装步骤
 
-添加完成后，在阶跃桌面助手中尝试使用 scrcpy 功能：
-
-```
-// 连接设备
-连接到 Android 设备 192.168.5.3:5555
-
-// 截图
-截取屏幕截图
-
-// 录音
-录制 10 秒音频
-```
-
-## 常见问题
-
-### 1. 连接失败
-
-- 确保 scrcpy_http_mcp_server.py 已启动
-- 检查端口号 3359 是否被占用
-- 确认 URL 格式正确：`http://localhost:3359/mcp`
-
-### 2. 设备未发现
-
-- 确保 Android 设备已启用 USB 调试
-- 检查设备是否在同一网络
-- 尝试使用 USB 线连接一次
-
-### 3. 音频功能不可用
-
-- 启动服务器时使用 `--audio` 参数：
-  ```bash
-  python scrcpy_http_mcp_server.py --audio
-  ```
-
-## 启动 MCP 服务器
+### 1. 克隆项目
 
 ```bash
-# 进入项目目录
-cd scrcpy-py-ddlx
-
-# 启动 MCP 服务器（启用音频）
-python scrcpy_http_mcp_server.py --audio
+mkdir ddlx && cd ddlx
+git clone https://github.com/AIddlx/scrcpy-py-ddlx.git .
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-服务器默认运行在 `http://localhost:3359/mcp`
+### 2. 启动 MCP 服务器
 
-## 可用功能
+```bash
+# USB 模式（推荐）
+python scrcpy_http_mcp_server.py --adb
 
-| 功能 | 说明 |
+# 网络模式（需先通过 USB 推送服务端）
+python scrcpy_http_mcp_server.py --net
+
+# 如需截图功能
+python scrcpy_http_mcp_server.py --adb --video
+
+# 如需录音功能
+python scrcpy_http_mcp_server.py --adb --audio
+```
+
+服务器运行在 `http://127.0.0.1:3359/mcp`，**保持此窗口运行**。
+
+> 详细参数参见 [MCP 服务器使用指南](../mcp-server-guide.md)
+
+---
+
+## 配置阶跃助手
+
+### 步骤 1: 显示主窗口
+
+电脑右下角"小跃"图标，**右键** → "显示主窗口"
+
+![步骤1](../../../image/1.png)
+
+### 步骤 2: 进入设置
+
+主窗口**右上角**，**左键点击**圆形图标
+
+![步骤2](../../../image/2.png)
+
+### 步骤 3: 打开工具箱
+
+设置页面中点击"**工具箱**"
+
+![步骤3](../../../image/3.png)
+
+### 步骤 4: 添加外部工具
+
+点击"**添加外部工具**"
+
+![步骤4](../../../image/4.png)
+
+### 步骤 5: 配置 MCP
+
+选择"**添加外部 MCP 工具**"，填写：
+
+| 参数 | 值 |
+|------|---|
+| 名称 | `scrcpy` |
+| URL | `http://127.0.0.1:3359/mcp` |
+
+![步骤5](../../../image/5.png)
+
+---
+
+## 可用工具
+
+阶跃助手连接后会自动获取工具列表，主要工具包括：
+
+### 连接管理
+
+| 工具 | 说明 |
 |------|------|
-| 连接设备 | 连接到 Android 设备 |
-| 截图 | 截取屏幕截图 |
-| 点击/滑动 | 控制设备触控 |
-| 录音 | 录制设备音频（异步） |
-| 应用列表 | 列出已安装应用 |
-| 剪贴板 | 同步剪贴板内容 |
+| `connect` | 连接设备（USB 或网络模式） |
+| `disconnect` | 断开连接 |
+| `list_devices` | 列出已连接的 ADB 设备 |
+| `get_state` | 获取当前状态（屏幕尺寸、方向等） |
+
+### 控制操作
+
+| 工具 | 说明 |
+|------|------|
+| `tap` | 点击坐标 |
+| `swipe` | 滑动 |
+| `press_key` | 按键（HOME/BACK/等） |
+| `type_text` | 输入文字 |
+
+### 应用管理
+
+| 工具 | 说明 |
+|------|------|
+| `list_apps` | 列出已安装应用 |
+| `start_app` | 启动应用 |
+| `stop_app` | 停止应用 |
+
+### 媒体功能
+
+| 工具 | 说明 | 依赖参数 |
+|------|------|----------|
+| `screenshot` | 截图 | 启动时加 `--video` |
+| `start_recording` | 开始录音 | 启动时加 `--audio` |
+| `stop_recording` | 停止录音 | 启动时加 `--audio` |
+
+### 文件操作
+
+| 工具 | 说明 |
+|------|------|
+| `push_file` | 推送文件到设备 |
+| `pull_file` | 从设备拉取文件 |
+
+### 剪贴板
+
+| 工具 | 说明 |
+|------|------|
+| `get_clipboard` | 获取设备剪贴板 |
+| `set_clipboard` | 设置设备剪贴板 |
+
+---
 
 ## 使用示例
 
-添加 MCP 工具后，你可以在阶跃桌面助手中直接控制 Android 设备。
+添加 MCP 工具后，直接用自然语言与阶跃助手对话：
 
-**示例：打开哔哩哔哩应用**
+**连接设备（USB 模式）：**
+```
+通过 USB 连接手机
+```
 
-![使用示例](../image/6.png)
+**连接设备（网络模式）：**
+```
+通过网络连接手机 192.168.1.100
+```
 
-**执行流程：**
-1. AI 连接到手机设备
-2. 获取已安装应用列表
+**控制操作：**
+```
+截取屏幕截图
+点击屏幕中央
+打开哔哩哔哩
+输入文字"你好"
+```
+
+**示例：打开哔哩哔哩**
+
+![使用示例](../../../image/6.png)
+
+执行流程：
+1. AI 调用 `connect` 连接设备
+2. 调用 `list_apps` 获取应用列表
 3. 找到哔哩哔哩（包名：tv.danmaku.bili）
-4. 打开应用
+4. 调用 `start_app` 打开应用
 
-你也可以尝试其他任务：
-- "截取屏幕截图"
-- "打开设置"
-- "录制 10 秒音频"
-- "点击屏幕中央"
-- "滑动查看更多"
+---
+
+## 常见问题
+
+### 连接失败
+
+- 确保 MCP 服务器已启动
+- 检查端口 3359 未被占用
+- USB 模式需确保 ADB 连接正常（`adb devices`）
+
+### 网络模式连接失败
+
+1. 先用 USB 线连接设备
+2. 启动服务器时指定网络模式：
+   ```bash
+   python scrcpy_http_mcp_server.py --net
+   ```
+3. 或使用驻留模式推送服务端：
+   ```bash
+   python scrcpy_http_mcp_server.py --net --stay-alive
+   ```
+
+### 截图/录音功能不可用
+
+启动服务器时添加对应参数：
+```bash
+# 启用截图
+python scrcpy_http_mcp_server.py --adb --video
+
+# 启用录音
+python scrcpy_http_mcp_server.py --adb --audio
+
+# 完整功能
+python scrcpy_http_mcp_server.py --adb --video --audio
+```

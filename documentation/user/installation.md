@@ -19,11 +19,6 @@
 pip install -r requirements.txt
 ```
 
-或手动安装：
-
-```bash
-pip install av>=13.0.0 numpy>=1.24.0 PySide6
-```
 
 ---
 
@@ -45,21 +40,44 @@ pip install av>=13.0.0 numpy>=1.24.0 PySide6
 2. **编译 Server**
 
    ```bash
-   cd scrcpy
-   ./gradlew.bat server:assembleRelease
+   # Linux/macOS/Git Bash
+   ./scrcpy/release/build_server.sh
    ```
 
-3. **复制到项目根目录**
-
-   ```bash
-   cp server/build/outputs/apk/release/server-release-unsigned.apk ../scrcpy-server
-   ```
+   编译完成后，`scrcpy-server` 文件会自动生成在项目根目录。
 
 ### 验证
 
 ```bash
 ls -lh scrcpy-server
 # 应该显示约 90KB 的文件
+```
+
+---
+
+## 编译 Companion APK
+
+Companion APK 是手机端管理工具，用于网络模式下查看服务端状态和终止服务。
+
+### 编译步骤
+
+```bash
+# Windows
+scrcpy\companion\build.cmd
+
+# 或使用 Gradle
+scrcpy\companion\gradlew.bat assembleDebug
+
+# Linux/macOS
+./scrcpy/companion/build.sh
+```
+
+编译完成后，APK 位于 `scrcpy/companion/scrcpy-companion.apk`。
+
+### 安装到设备
+
+```bash
+adb install scrcpy/companion/scrcpy-companion.apk
 ```
 
 ---

@@ -155,7 +155,7 @@ TOOLS = [
     # 连接管理
     {
         "name": "connect",
-        "description": "Connect to an Android device. RECOMMENDED: Use USB with adb_tunnel mode (default, most secure). For wireless, first run push_server(stay_alive=True) via USB, then use network mode. SECURITY: ADB WiFi (5555) is insecure - do NOT use in public networks. Network mode should only be used in trusted private networks.",
+        "description": "Connect to an Android device. IMPORTANT: Call get_state() FIRST to check if already connected and to determine the correct connection_mode. If server started with --adb, use connection_mode='adb_tunnel' (default). If server started with --net, use connection_mode='network' and device_id must be an IP address. Parameters must match the server startup mode.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -164,11 +164,11 @@ TOOLS = [
                     "type": "string",
                     "enum": ["adb_tunnel", "network"],
                     "default": "adb_tunnel",
-                    "description": "Connection mode: 'adb_tunnel' (default, secure, uses USB) or 'network' (direct TCP+UDP, requires server running on device)"
+                    "description": "Connection mode: 'adb_tunnel' (default, for --adb server) or 'network' (for --net server). MUST match server startup mode."
                 },
                 "device_id": {
                     "type": "string",
-                    "description": "Device serial (USB) or IP address (network mode). For network mode, use just IP like '192.168.1.100'"
+                    "description": "For adb_tunnel mode: device serial (from list_devices). For network mode: device IP address like '192.168.1.100'. Check list_devices() return value's connect_hint for correct values."
                 },
                 # 网络模式参数
                 "control_port": {"type": "integer", "default": 27184, "description": "TCP control port (network mode, default: 27184)"},
@@ -236,12 +236,12 @@ TOOLS = [
     },
     {
         "name": "get_state",
-        "description": "Get current device state including width, height, orientation (portrait/landscape), and connection status. Call this before using any coordinate-based tools to get current screen dimensions. IMPORTANT: If this returns 'Not connected', first call discover_devices() or list_devices() to find available devices.",
+        "description": "ALWAYS CALL THIS FIRST. Returns: connected (bool), mode (string: 'adb' or 'network'), capabilities (list of available features), limitations (list of unavailable features). If connected: also returns device_name, width, height, orientation. If not connected: returns hint and retry_action. Use this to determine what operations are available before calling other tools.",
         "inputSchema": {"type": "object", "properties": {}}
     },
     {
         "name": "list_devices",
-        "description": "List all ADB connected devices. If empty, call discover_devices() to scan the local network for wireless devices.",
+        "description": "List ADB connected devices. Returns devices with serial, ip, and connect_hint showing correct parameters for each connection mode. Check server_mode and mode_hint in the response to determine which connect_hint to use. If empty, call discover_devices() to scan local network.",
         "inputSchema": {"type": "object", "properties": {}}
     },
     {
@@ -915,11 +915,19 @@ class ScrcpyMCPHandler:
         self._lock = threading.Lock()
         self._current_config = None
         self._preview_manager = None  # Separated preview process
-        self._server = None
-        self._lock = threading.Lock()  # 线程安全锁
-        self._current_config = None    # 当前配置
         self._screenshot_method = None  # 截图方式: "video_stream", "tcp_screenshot", "adb_screencap"
         self._audio_method = None       # 音频录制方式: "audio_stream", "adb_record"
+        # 启动配置（由 main() 注入）
+        self._startup_mode = None       # "adb" 或 "network"
+        self._startup_video = False     # 启动时是否启用 video
+        self._startup_audio = False     # 启动时是否启用 audio
+
+    def set_startup_config(self, mode: str, video: bool, audio: bool):
+        """设置启动配置（由 main() 调用）"""
+        self._startup_mode = mode
+        self._startup_video = video
+        self._startup_audio = audio
+        logger.info(f"[Handler] Startup config: mode={mode}, video={video}, audio={audio}")
 
     def _is_client_connected(self) -> bool:
         """检查客户端是否已连接"""
@@ -1973,11 +1981,35 @@ class ScrcpyMCPHandler:
                             "hardware_encoders": encoder_info if encoder_info else "not cached"
                         }
                     else:
+                        # 增强错误提示，帮助 AI 理解问题
+                        requested_mode = arguments.get("connection_mode", "adb_tunnel")
+                        requested_device = arguments.get("device_id", "")
+
+                        # 检测模式不匹配
+                        mode_mismatch = False
+                        if self._startup_mode == "network" and requested_mode == "adb_tunnel":
+                            mode_mismatch = True
+                        elif self._startup_mode == "adb" and requested_mode == "network":
+                            mode_mismatch = True
+
                         result = {
                             "success": False,
                             "error": "Failed to connect",
-                            "hint": "For network mode, ensure scrcpy server is running on device. For ADB mode, ensure device is connected."
+                            "server_mode": self._startup_mode,
+                            "requested_mode": requested_mode,
+                            "requested_device": requested_device,
                         }
+
+                        if mode_mismatch:
+                            result["mode_mismatch"] = True
+                            if self._startup_mode == "network":
+                                result["hint"] = f"Server started with --net mode. Use connection_mode='network' and device_id='IP_ADDRESS'."
+                                result["example"] = "connect(device_id='192.168.x.x', connection_mode='network')"
+                            else:
+                                result["hint"] = f"Server started with --adb mode. Use connection_mode='adb_tunnel' (default) and device_id='SERIAL'."
+                                result["example"] = "connect(device_id='SERIAL_FROM_LIST_DEVICES')"
+                        else:
+                            result["hint"] = "Connection failed. For network mode, ensure stay-alive server is running on device. For ADB mode, ensure device is connected via USB."
                     result_text = json.dumps(result, ensure_ascii=False, indent=2)
                     return {"content": [{"type": "text", "text": result_text}]}
 
@@ -2047,13 +2079,23 @@ class ScrcpyMCPHandler:
                                 "type": d.device_type.value,
                                 "ready": d.is_ready(),
                                 "unauthorized": d.is_unauthorized(),
-                                "ip": ip
+                                "ip": ip,
+                                "connect_hint": {
+                                    "adb_tunnel": {"device_id": d.serial, "connection_mode": "adb_tunnel"},
+                                    "network": {"device_id": ip, "connection_mode": "network"} if ip else None
+                                }
                             })
                         result = {
                             "success": True,
                             "count": len(devices_info),
-                            "devices": devices_info
+                            "devices": devices_info,
+                            "server_mode": self._startup_mode
                         }
+                        # 添加模式提示
+                        if self._startup_mode == "network":
+                            result["mode_hint"] = "Server is in network mode. Use device's IP address for device_id."
+                        elif self._startup_mode == "adb":
+                            result["mode_hint"] = "Server is in ADB mode. Use device's serial for device_id."
                         # 如果没有设备，添加提示信息
                         if len(devices_info) == 0:
                             result["hint"] = "No devices found. Call discover_devices() to scan local network for wireless ADB devices."
@@ -3223,16 +3265,58 @@ class ScrcpyMCPHandler:
                     result["filepath"] = str(Path(result["filename"]).absolute())
                     result["message"] = f"Video recording saved to: {result['filepath']}"
 
-                # 如果是 get_state，添加明确的尺寸信息
-                if tool_name == "get_state" and result.get("connected") and "device_size" in result:
-                    device_size = result["device_size"]
-                    if len(device_size) >= 2:
-                        # device_size 格式: [width, height]
-                        width = device_size[0]
-                        height = device_size[1]
-                        result["width"] = width
-                        result["height"] = height
-                        result["orientation"] = "portrait" if height > width else "landscape"
+                # 如果是 get_state，增强返回值
+                if tool_name == "get_state":
+                    # 添加启动模式信息
+                    result["mode"] = self._startup_mode or "unknown"
+
+                    # 计算可用功能
+                    capabilities = ["control", "file"]  # 控制和文件传输始终可用
+                    limitations = []
+
+                    # 截图功能
+                    if self._startup_video:
+                        capabilities.append("screenshot")
+                        capabilities.append("preview")
+                    else:
+                        # 无 video 时，network 模式可用 TCP 截图，adb 模式可用 screencap
+                        capabilities.append("screenshot")
+                        limitations.append("preview")
+
+                    # 录音功能
+                    if self._startup_audio:
+                        capabilities.append("record_audio")
+                    else:
+                        limitations.append("record_audio")
+
+                    result["capabilities"] = capabilities
+                    result["limitations"] = limitations
+
+                    # 处理已连接状态
+                    if result.get("connected") and "device_size" in result:
+                        device_size = result["device_size"]
+                        if len(device_size) >= 2:
+                            width = device_size[0]
+                            height = device_size[1]
+                            result["width"] = width
+                            result["height"] = height
+                            result["orientation"] = "portrait" if height > width else "landscape"
+                        # 移除冗余字段
+                        if "device_size" in result:
+                            del result["device_size"]
+                        if "codec_id" in result:
+                            del result["codec_id"]
+                        if "tcpip_connected" in result:
+                            del result["tcpip_connected"]
+
+                    # 未连接时添加提示
+                    if not result.get("connected"):
+                        if self._startup_mode == "network":
+                            result["hint"] = "Server started in network mode. Device should auto-connect when stay-alive server is running."
+                            result["retry_action"] = "Ensure stay-alive server is running on device, or use wake_up() to wake device."
+                        else:
+                            result["hint"] = "Server started in ADB mode. Use connect() to connect device."
+                            result["retry_action"] = "Call connect() with device serial from list_devices()."
 
                 # 格式化返回结果
                 result_text = json.dumps(result, ensure_ascii=False, indent=2)
@@ -4182,7 +4266,12 @@ async def on_startup():
 
                 print_detail("认证...")
                 print_success()
-                print_detail("控制: 27184 | 视频: 27185 | 音频: 27186")
+                port_info = "控制: 27184"
+                if _enable_video:
+                    port_info += " | 视频: 27185"
+                if DEFAULT_AUDIO_ENABLED:
+                    port_info += " | 音频: 27186"
+                print_detail(port_info)
                 print_success()
 
                 print("")
@@ -4193,9 +4282,10 @@ async def on_startup():
 
                 # 初始化组件信息
                 print_step("初始化组件")
-                if _device_resolution:
+                if _enable_video and _device_resolution:
                     print_detail(f"视频解码器: {actual_codec} ({_device_resolution})")
-                print_detail(f"音频解码器: opus")
+                if DEFAULT_AUDIO_ENABLED:
+                    print_detail(f"音频解码器: opus")
                 print_success()
 
                 # 启动预览窗口
@@ -4269,14 +4359,20 @@ async def on_startup():
 
                 print_detail(f"认证...")
                 print_success()
-                print_detail(f"控制: 27184 | 视频: 27185 | 音频: 27186")
+                port_info = "控制: 27184"
+                if _enable_video:
+                    port_info += " | 视频: 27185"
+                if DEFAULT_AUDIO_ENABLED:
+                    port_info += " | 音频: 27186"
+                print_detail(port_info)
                 print_success()
 
                 # Initialize components info
                 print_step("初始化组件")
-                if _device_resolution:
+                if _enable_video and _device_resolution:
                     print_detail(f"视频解码器: {_video_codec} ({_device_resolution})")
-                print_detail(f"音频解码器: {'opus' if DEFAULT_AUDIO_ENABLED else 'N/A'}")
+                if DEFAULT_AUDIO_ENABLED:
+                    print_detail(f"音频解码器: opus")
                 print_success()
 
                 # Auto-start preview if requested
@@ -4368,10 +4464,12 @@ async def on_startup():
                 else:
                     bitrate_str = f"{bitrate_val // 1000}K"
 
-                if _device_resolution:
+                if _enable_video and _device_resolution:
                     print_detail(f"视频解码器: {actual_codec} ({_device_resolution})")
-                print_detail(f"请求参数: {bitrate_str}, {_video_fps}fps")
-                print_detail(f"音频解码器: {'opus' if DEFAULT_AUDIO_ENABLED else 'N/A'}")
+                if _enable_video:
+                    print_detail(f"请求参数: {bitrate_str}, {_video_fps}fps")
+                if DEFAULT_AUDIO_ENABLED:
+                    print_detail(f"音频解码器: opus")
                 print_success()
 
                 # Auto-start preview if requested
@@ -4727,6 +4825,14 @@ Quick Start Examples:
 
     port = args.port
     host = args.host
+
+    # 注入启动配置到 handler
+    startup_mode = "adb" if args.adb else ("network" if args.net else "unknown")
+    handler.set_startup_config(
+        mode=startup_mode,
+        video=_enable_video,
+        audio=DEFAULT_AUDIO_ENABLED
+    )
 
     # 打印启动信息（简洁格式）
     from datetime import datetime
