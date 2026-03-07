@@ -8,10 +8,103 @@
 
 ### 基本要求
 
-- **Python**: 3.8 或更高版本
-- **操作系统**: Windows、macOS 或 Linux
+- **Python**: 3.10 或更高版本
+- **操作系统**: Windows 10/11、macOS 或 Linux
 - **Android 设备**: API 21+ (Android 5.0+)
 - **ADB**: Android SDK Platform Tools
+
+---
+
+## ADB 安装
+
+ADB (Android Debug Bridge) 是与 Android 设备通信的必备工具。
+
+### Windows
+
+**方式 1: 官方下载（推荐）**
+
+下载：[platform-tools-latest-windows.zip](https://googledownloads.cn/android/repository/platform-tools-latest-windows.zip)
+
+```powershell
+# 1. 解压到任意目录（如 C:\platform-tools）
+# 2. 添加到 PATH 环境变量：
+#    - 右键"此电脑" → 属性 → 高级系统设置 → 环境变量
+#    - 在 Path 中添加解压路径，如 C:\platform-tools
+# 3. 打开新终端，验证安装
+adb version
+```
+
+**方式 2: 使用 winget**
+
+```powershell
+winget install Google.PlatformTools
+```
+
+### macOS
+
+**方式 1: 官方下载（推荐）**
+
+下载：[platform-tools-latest-darwin.zip](https://googledownloads.cn/android/repository/platform-tools-latest-darwin.zip)
+
+```bash
+# 1. 解压到任意目录（如 ~/platform-tools）
+# 2. 添加到 PATH:
+echo 'export PATH="$HOME/platform-tools:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# 3. 验证安装
+adb version
+```
+
+**方式 2: 使用 Homebrew**
+
+```bash
+brew install android-platform-tools
+```
+
+### Linux
+
+**方式 1: 官方下载（推荐）**
+
+下载：[platform-tools-latest-linux.zip](https://googledownloads.cn/android/repository/platform-tools-latest-linux.zip)
+
+```bash
+# 1. 解压到任意目录（如 ~/platform-tools）
+# 2. 添加到 PATH:
+echo 'export PATH="$HOME/platform-tools:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# 3. 验证安装
+adb version
+```
+
+**方式 2: 包管理器**
+
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install android-tools-adb android-tools-fastboot
+
+# Fedora
+sudo dnf install android-tools
+
+# Arch Linux
+sudo pacman -S android-tools
+```
+
+### 启用 USB 调试
+
+安装 ADB 后，需在 Android 设备上启用 USB 调试：
+
+1. **启用开发者选项**：设置 → 关于手机 → 连续点击"版本号" 7 次
+2. **开启 USB 调试**：设置 → 开发者选项 → USB 调试（开启）
+3. **连接设备**：用 USB 线连接电脑，设备上弹出授权对话框时点击"允许"
+4. **验证连接**：
+   ```bash
+   adb devices
+   # 应显示类似：
+   # List of devices attached
+   # ABC123456789    device
+   ```
 
 ### Python 依赖
 

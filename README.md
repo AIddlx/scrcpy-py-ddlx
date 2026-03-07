@@ -75,6 +75,57 @@ AI 发送指令 → MCP 服务器 → scrcpy-py-ddlx → Android 设备
 
 > **平台兼容性说明**：本项目在 Windows 10/11 环境下充分测试。Linux 和 macOS 理论上可以运行（核心功能使用跨平台库），但由于缺少测试硬件，暂未进行适配和验证。欢迎社区贡献其他平台的支持。
 
+### ADB 安装
+
+本项目依赖 ADB (Android Debug Bridge) 与设备通信。
+
+**下载：**
+- [下载适用于 Windows 的 SDK Platform-Tools](https://googledownloads.cn/android/repository/platform-tools-latest-windows.zip)
+- [下载适用于 macOS 的 SDK Platform-Tools](https://googledownloads.cn/android/repository/platform-tools-latest-darwin.zip)
+- [下载适用于 Linux 的 SDK Platform-Tools](https://googledownloads.cn/android/repository/platform-tools-latest-linux.zip)
+
+**Windows 环境变量配置：**
+1. 解压到任意目录（如 `C:\platform-tools`）
+2. 右键"此电脑" → 属性 → 高级系统设置 → 环境变量
+3. 在"Path"中添加解压路径
+4. 打开新终端，验证：`adb version`
+
+> 📖 详细安装步骤见 [安装指南](documentation/user/installation.md#adb-安装)
+
+---
+
+## ⚠️ 安全警告
+
+### 连接模式安全分级
+
+| 模式 | 安全性 | 说明 |
+|------|--------|------|
+| **USB** | ⭐⭐⭐⭐⭐ 最安全 | 数据通过 USB 传输，物理隔离 |
+| **WiFi (ADB 隧道)** | ⭐⭐⭐⭐ 安全 | 通过 ADB 加密隧道传输 |
+| **网络直连** | ⭐⭐ 低风险 | **明文传输，仅限可信赖内网** |
+
+> 🔴 **重要**：网络直连模式（`--net`）的 TCP/UDP 数据流**不加密**。请勿在公共 WiFi 或不可信网络环境下使用。
+
+### MCP 服务器安全
+
+- 默认监听 `127.0.0.1`（仅本机访问）
+- 使用 `--host 0.0.0.0` 会暴露给局域网，**确保网络可信**
+
+### 敏感操作警告
+
+以下 MCP 工具需要谨慎使用：
+
+| 工具 | 风险 | 说明 |
+|------|------|------|
+| `delete_file` | 🔴 高 | **不可逆删除**，不经过回收站 |
+| `push_file` | 🟡 中 | 可写入设备任意位置 |
+| `pull_file` | 🟡 中 | 可读取设备任意文件 |
+| `screenshot` | 🟡 中 | 截图可能包含敏感信息 |
+
+建议：执行 `delete_file` 前先用 `list_dir` 确认路径。
+
+---
+
 ### 安装步骤
 
 ```bash
